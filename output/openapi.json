@@ -1,0 +1,414 @@
+{
+	"openapi": "3.1.0",
+	"info": { "title": "Mars Package API", "version": "0.1.0" },
+	"paths": {
+		"/api/v1/manifest/preview": {
+			"get": {
+				"summary": "Get Release Manifest Preview",
+				"operationId": "get_release_manifest_api_v1_manifest_preview_get",
+				"responses": {
+					"200": {
+						"description": "Successful Response",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ReleaseManifest"
+								}
+							}
+						}
+					}
+				},
+				"security": [{ "HTTPBearer": [] }]
+			}
+		},
+		"/api/v1/manifest.json": {
+			"get": {
+				"summary": "Get Published Signed Manifest",
+				"operationId": "published_manifest_api_v1_manifest_json_get",
+				"responses": {
+					"200": {
+						"description": "Signed manifest bytes",
+						"content": {
+							"application/json": {
+								"schema": {}
+							}
+						}
+					},
+					"503": {
+						"description": "Signed release artifacts are unavailable"
+					}
+				}
+			}
+		},
+		"/api/v1/manifest.json.sig": {
+			"get": {
+				"summary": "Get Published Manifest Signature",
+				"operationId": "published_manifest_signature_api_v1_manifest_json_sig_get",
+				"responses": {
+					"200": {
+						"description": "Detached Ed25519 signature",
+						"content": {
+							"text/plain": {
+								"schema": {
+									"type": "string"
+								}
+							}
+						}
+					},
+					"503": {
+						"description": "Signed release artifacts are unavailable"
+					}
+				}
+			}
+		},
+		"/api/v1/files/{relative_path}": {
+			"get": {
+				"summary": "Download Release File",
+				"operationId": "download_release_file_api_v1_files__relative_path__get",
+				"parameters": [
+					{
+						"name": "relative_path",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"title": "Relative Path"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Successful Response",
+						"content": {
+							"application/json": {
+								"schema": {}
+							}
+						}
+					},
+					"422": {
+						"description": "Validation Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/HTTPValidationError"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/v1/mods": {
+			"get": {
+				"summary": "List Mods",
+				"operationId": "list_mods_api_v1_mods_get",
+				"responses": {
+					"200": {
+						"description": "Successful Response",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ModListResponse"
+								}
+							}
+						}
+					}
+				},
+				"security": [{ "HTTPBearer": [] }]
+			}
+		},
+		"/api/v1/mods/{mod_id}/download": {
+			"get": {
+				"summary": "Download Mod",
+				"operationId": "download_mod_api_v1_mods__mod_id__download_get",
+				"security": [{ "HTTPBearer": [] }],
+				"parameters": [
+					{
+						"name": "mod_id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"title": "Mod Id"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Successful Response",
+						"content": {
+							"application/json": {
+								"schema": {}
+							}
+						}
+					},
+					"422": {
+						"description": "Validation Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/HTTPValidationError"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/v1/health": {
+			"get": {
+				"summary": "Health",
+				"operationId": "health_api_v1_health_get",
+				"responses": {
+					"200": {
+						"description": "Successful Response",
+						"content": {
+							"application/json": {
+								"schema": {
+									"additionalProperties": true,
+									"type": "object",
+									"title": "Response Health Api V1 Health Get"
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	},
+	"components": {
+		"schemas": {
+			"HTTPValidationError": {
+				"properties": {
+					"detail": {
+						"items": {
+							"$ref": "#/components/schemas/ValidationError"
+						},
+						"type": "array",
+						"title": "Detail"
+					}
+				},
+				"type": "object",
+				"title": "HTTPValidationError"
+			},
+			"ModEntry": {
+				"properties": {
+					"id": {
+						"type": "string",
+						"title": "Id"
+					},
+					"name": {
+						"type": "string",
+						"title": "Name"
+					},
+					"version": {
+						"type": "string",
+						"title": "Version"
+					},
+					"filename": {
+						"type": "string",
+						"title": "Filename"
+					},
+					"size": {
+						"type": "integer",
+						"title": "Size"
+					},
+					"sha256": {
+						"type": "string",
+						"title": "Sha256"
+					},
+					"downloadUrl": {
+						"type": "string",
+						"title": "Downloadurl"
+					}
+				},
+				"type": "object",
+				"required": [
+					"id",
+					"name",
+					"version",
+					"filename",
+					"size",
+					"sha256",
+					"downloadUrl"
+				],
+				"title": "ModEntry"
+			},
+			"ModListResponse": {
+				"properties": {
+					"mods": {
+						"items": {
+							"$ref": "#/components/schemas/ModEntry"
+						},
+						"type": "array",
+						"title": "Mods"
+					}
+				},
+				"type": "object",
+				"required": ["mods"],
+				"title": "ModListResponse"
+			},
+			"ReleaseFile": {
+				"properties": {
+					"path": {
+						"type": "string",
+						"title": "Path"
+					},
+					"sha256": {
+						"type": "string",
+						"title": "Sha256"
+					},
+					"size": {
+						"type": "integer",
+						"title": "Size"
+					},
+					"required": {
+						"type": "boolean",
+						"title": "Required",
+						"default": true
+					},
+					"mutable": {
+						"type": "boolean",
+						"title": "Mutable",
+						"default": false
+					},
+					"side": {
+						"type": "string",
+						"enum": ["client", "both"],
+						"title": "Side",
+						"default": "client"
+					},
+					"downloadUrl": {
+						"type": "string",
+						"title": "Downloadurl"
+					},
+					"manualDownload": {
+						"type": "boolean",
+						"title": "Manualdownload",
+						"default": false
+					},
+					"sourcePage": {
+						"anyOf": [
+							{ "type": "string" },
+							{ "type": "null" }
+						],
+						"title": "Sourcepage"
+					}
+				},
+				"type": "object",
+				"required": [
+					"path",
+					"sha256",
+					"size",
+					"downloadUrl"
+				],
+				"title": "ReleaseFile"
+			},
+			"ReleaseManifest": {
+				"properties": {
+					"schemaVersion": {
+						"type": "integer",
+						"title": "Schemaversion"
+					},
+					"packVersion": {
+						"type": "string",
+						"title": "Packversion"
+					},
+					"minecraftVersion": {
+						"type": "string",
+						"title": "Minecraftversion"
+					},
+					"loader": {
+						"type": "string",
+						"title": "Loader"
+					},
+					"loaderVersion": {
+						"type": "string",
+						"title": "Loaderversion"
+					},
+					"generatedAt": {
+						"type": "string",
+						"title": "Generatedat"
+					},
+					"managedDirs": {
+						"items": { "type": "string" },
+						"type": "array",
+						"title": "Manageddirs"
+					},
+					"files": {
+						"items": {
+							"$ref": "#/components/schemas/ReleaseFile"
+						},
+						"type": "array",
+						"title": "Files"
+					},
+					"curseforgeMods": {
+						"items": {
+							"additionalProperties": true,
+							"type": "object"
+						},
+						"type": "array",
+						"title": "Curseforgemods"
+					},
+					"modsDir": {
+						"anyOf": [
+							{ "type": "string" },
+							{ "type": "null" }
+						],
+						"title": "Modsdir",
+						"default": "mods"
+					}
+				},
+				"type": "object",
+				"required": [
+					"schemaVersion",
+					"packVersion",
+					"minecraftVersion",
+					"loader",
+					"loaderVersion",
+					"generatedAt",
+					"managedDirs",
+					"files"
+				],
+				"title": "ReleaseManifest"
+			},
+			"ValidationError": {
+				"properties": {
+					"loc": {
+						"items": {
+							"anyOf": [
+								{
+									"type": "string"
+								},
+								{
+									"type": "integer"
+								}
+							]
+						},
+						"type": "array",
+						"title": "Location"
+					},
+					"msg": {
+						"type": "string",
+						"title": "Message"
+					},
+					"type": {
+						"type": "string",
+						"title": "Error Type"
+					},
+					"input": { "title": "Input" },
+					"ctx": {
+						"type": "object",
+						"title": "Context"
+					}
+				},
+				"type": "object",
+				"required": ["loc", "msg", "type"],
+				"title": "ValidationError"
+			}
+		},
+		"securitySchemes": {
+			"HTTPBearer": { "type": "http", "scheme": "bearer" }
+		}
+	}
+}
