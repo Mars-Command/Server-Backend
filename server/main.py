@@ -15,6 +15,11 @@ from fastapi.responses import FileResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
+if __package__:
+    from .community import install_community
+else:
+    from community import install_community
+
 DEV_TOKEN_ENABLED = os.environ.get("DEV_TOKEN", "").lower() == "true"
 
 if DEV_TOKEN_ENABLED:
@@ -77,6 +82,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 bearer = HTTPBearer(auto_error=False)
+install_community(app)
 
 
 class ModEntry(BaseModel):

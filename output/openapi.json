@@ -2,6 +2,1285 @@
 	"openapi": "3.1.0",
 	"info": { "title": "Mars Package API", "version": "0.1.0" },
 	"paths": {
+		"/api/auth/session": {
+			"get": {
+				"summary": "Session",
+				"operationId": "session_api_auth_session_get",
+				"responses": {
+					"200": {
+						"description": "Successful Response",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/SessionResponse"
+								}
+							}
+						}
+					},
+					"401": {
+						"description": "Unauthorized",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						}
+					},
+					"403": {
+						"description": "Forbidden",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						}
+					},
+					"409": {
+						"description": "Conflict",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						}
+					},
+					"413": {
+						"description": "Content Too Large",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						}
+					},
+					"422": {
+						"description": "Unprocessable Content",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						}
+					},
+					"429": {
+						"description": "Too Many Requests",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						}
+					},
+					"503": {
+						"description": "Service Unavailable",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/auth/logout": {
+			"post": {
+				"summary": "Logout",
+				"operationId": "logout_api_auth_logout_post",
+				"responses": {
+					"204": {
+						"description": "Successful Response"
+					},
+					"401": {
+						"description": "Unauthorized",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						}
+					},
+					"403": {
+						"description": "Forbidden",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						}
+					},
+					"409": {
+						"description": "Conflict",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						}
+					},
+					"413": {
+						"description": "Content Too Large",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						}
+					},
+					"422": {
+						"description": "Unprocessable Content",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						}
+					},
+					"429": {
+						"description": "Too Many Requests",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						}
+					},
+					"503": {
+						"description": "Service Unavailable",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/auth/github/start": {
+			"get": {
+				"summary": "Github Start",
+				"operationId": "github_start_api_auth_github_start_get",
+				"parameters": [
+					{
+						"name": "requestId",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"anyOf": [
+								{
+									"type": "string",
+									"pattern": "^[a-f0-9]{32}$"
+								},
+								{
+									"type": "null"
+								}
+							],
+							"title": "Requestid"
+						}
+					},
+					{
+						"name": "switchAccount",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"anyOf": [
+								{
+									"const": "1",
+									"type": "string"
+								},
+								{
+									"type": "null"
+								}
+							],
+							"title": "Switchaccount"
+						}
+					}
+				],
+				"responses": {
+					"302": {
+						"description": "Successful Response"
+					},
+					"401": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						},
+						"description": "Unauthorized"
+					},
+					"403": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						},
+						"description": "Forbidden"
+					},
+					"409": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						},
+						"description": "Conflict"
+					},
+					"413": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						},
+						"description": "Content Too Large"
+					},
+					"422": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						},
+						"description": "Unprocessable Content"
+					},
+					"429": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						},
+						"description": "Too Many Requests"
+					},
+					"503": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						},
+						"description": "Service Unavailable"
+					}
+				}
+			}
+		},
+		"/api/auth/github/callback": {
+			"get": {
+				"summary": "Github Callback",
+				"operationId": "github_callback_api_auth_github_callback_get",
+				"parameters": [
+					{
+						"name": "state",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "string",
+							"maxLength": 128,
+							"default": "",
+							"title": "State"
+						}
+					},
+					{
+						"name": "code",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "string",
+							"maxLength": 1024,
+							"default": "",
+							"title": "Code"
+						}
+					},
+					{
+						"name": "error",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "string",
+							"maxLength": 128,
+							"default": "",
+							"title": "Error"
+						}
+					}
+				],
+				"responses": {
+					"303": {
+						"description": "Successful Response"
+					},
+					"401": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						},
+						"description": "Unauthorized"
+					},
+					"403": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						},
+						"description": "Forbidden"
+					},
+					"409": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						},
+						"description": "Conflict"
+					},
+					"413": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						},
+						"description": "Content Too Large"
+					},
+					"422": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						},
+						"description": "Unprocessable Content"
+					},
+					"429": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						},
+						"description": "Too Many Requests"
+					},
+					"503": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						},
+						"description": "Service Unavailable"
+					}
+				}
+			}
+		},
+		"/api/auth/desktop": {
+			"post": {
+				"summary": "Desktop",
+				"operationId": "desktop_api_auth_desktop_post",
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/Empty"
+							}
+						}
+					},
+					"required": true
+				},
+				"responses": {
+					"200": {
+						"description": "Successful Response",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/DeviceResponse"
+								}
+							}
+						}
+					},
+					"401": {
+						"description": "Unauthorized",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						}
+					},
+					"403": {
+						"description": "Forbidden",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						}
+					},
+					"409": {
+						"description": "Conflict",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						}
+					},
+					"413": {
+						"description": "Content Too Large",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						}
+					},
+					"422": {
+						"description": "Unprocessable Content",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						}
+					},
+					"429": {
+						"description": "Too Many Requests",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						}
+					},
+					"503": {
+						"description": "Service Unavailable",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/auth/desktop/poll": {
+			"post": {
+				"summary": "Poll",
+				"operationId": "poll_api_auth_desktop_poll_post",
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/Poll"
+							}
+						}
+					},
+					"required": true
+				},
+				"responses": {
+					"200": {
+						"description": "Successful Response",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/PollResponse"
+								}
+							}
+						}
+					},
+					"401": {
+						"description": "Unauthorized",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						}
+					},
+					"403": {
+						"description": "Forbidden",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						}
+					},
+					"409": {
+						"description": "Conflict",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						}
+					},
+					"413": {
+						"description": "Content Too Large",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						}
+					},
+					"422": {
+						"description": "Unprocessable Content",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						}
+					},
+					"429": {
+						"description": "Too Many Requests",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						}
+					},
+					"503": {
+						"description": "Service Unavailable",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/auth/desktop/approve": {
+			"post": {
+				"summary": "Approve",
+				"operationId": "approve_api_auth_desktop_approve_post",
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/Approve"
+							}
+						}
+					},
+					"required": true
+				},
+				"responses": {
+					"200": {
+						"description": "Successful Response",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ApprovalResponse"
+								}
+							}
+						}
+					},
+					"401": {
+						"description": "Unauthorized",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						}
+					},
+					"403": {
+						"description": "Forbidden",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						}
+					},
+					"409": {
+						"description": "Conflict",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						}
+					},
+					"413": {
+						"description": "Content Too Large",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						}
+					},
+					"422": {
+						"description": "Unprocessable Content",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						}
+					},
+					"429": {
+						"description": "Too Many Requests",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						}
+					},
+					"503": {
+						"description": "Service Unavailable",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/community/profiles": {
+			"get": {
+				"summary": "Public Profiles",
+				"operationId": "public_profiles_api_community_profiles_get",
+				"parameters": [
+					{
+						"name": "q",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "string",
+							"maxLength": 120,
+							"default": "",
+							"title": "Q"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Successful Response",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ProfilesResponse"
+								}
+							}
+						}
+					},
+					"401": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						},
+						"description": "Unauthorized"
+					},
+					"403": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						},
+						"description": "Forbidden"
+					},
+					"409": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						},
+						"description": "Conflict"
+					},
+					"413": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						},
+						"description": "Content Too Large"
+					},
+					"422": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						},
+						"description": "Unprocessable Content"
+					},
+					"429": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						},
+						"description": "Too Many Requests"
+					},
+					"503": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						},
+						"description": "Service Unavailable"
+					}
+				}
+			},
+			"post": {
+				"summary": "Create Profile",
+				"operationId": "create_profile_api_community_profiles_post",
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/ProfileCreate"
+							}
+						}
+					}
+				},
+				"responses": {
+					"201": {
+						"description": "Successful Response",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Profile"
+								}
+							}
+						}
+					},
+					"401": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						},
+						"description": "Unauthorized"
+					},
+					"403": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						},
+						"description": "Forbidden"
+					},
+					"409": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						},
+						"description": "Conflict"
+					},
+					"413": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						},
+						"description": "Content Too Large"
+					},
+					"422": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						},
+						"description": "Unprocessable Content"
+					},
+					"429": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						},
+						"description": "Too Many Requests"
+					},
+					"503": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						},
+						"description": "Service Unavailable"
+					}
+				}
+			}
+		},
+		"/api/community/profiles/mine": {
+			"get": {
+				"summary": "My Profiles",
+				"operationId": "my_profiles_api_community_profiles_mine_get",
+				"responses": {
+					"200": {
+						"description": "Successful Response",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ProfilesResponse"
+								}
+							}
+						}
+					},
+					"401": {
+						"description": "Unauthorized",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						}
+					},
+					"403": {
+						"description": "Forbidden",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						}
+					},
+					"409": {
+						"description": "Conflict",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						}
+					},
+					"413": {
+						"description": "Content Too Large",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						}
+					},
+					"422": {
+						"description": "Unprocessable Content",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						}
+					},
+					"429": {
+						"description": "Too Many Requests",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						}
+					},
+					"503": {
+						"description": "Service Unavailable",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/community/profiles/{profile_id}": {
+			"patch": {
+				"summary": "Patch Profile",
+				"operationId": "patch_profile_api_community_profiles__profile_id__patch",
+				"parameters": [
+					{
+						"name": "profile_id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"title": "Profile Id"
+						}
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/ProfilePatch"
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Successful Response",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Profile"
+								}
+							}
+						}
+					},
+					"401": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						},
+						"description": "Unauthorized"
+					},
+					"403": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						},
+						"description": "Forbidden"
+					},
+					"409": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						},
+						"description": "Conflict"
+					},
+					"413": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						},
+						"description": "Content Too Large"
+					},
+					"422": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						},
+						"description": "Unprocessable Content"
+					},
+					"429": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						},
+						"description": "Too Many Requests"
+					},
+					"503": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						},
+						"description": "Service Unavailable"
+					}
+				}
+			},
+			"delete": {
+				"summary": "Delete Profile",
+				"operationId": "delete_profile_api_community_profiles__profile_id__delete",
+				"parameters": [
+					{
+						"name": "profile_id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"title": "Profile Id"
+						}
+					}
+				],
+				"responses": {
+					"204": {
+						"description": "Successful Response"
+					},
+					"401": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						},
+						"description": "Unauthorized"
+					},
+					"403": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						},
+						"description": "Forbidden"
+					},
+					"409": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						},
+						"description": "Conflict"
+					},
+					"413": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						},
+						"description": "Content Too Large"
+					},
+					"422": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						},
+						"description": "Unprocessable Content"
+					},
+					"429": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						},
+						"description": "Too Many Requests"
+					},
+					"503": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						},
+						"description": "Service Unavailable"
+					}
+				}
+			}
+		},
+		"/api/community/profiles/{profile_id}/submit": {
+			"post": {
+				"summary": "Submit Profile",
+				"operationId": "submit_profile_api_community_profiles__profile_id__submit_post",
+				"parameters": [
+					{
+						"name": "profile_id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"title": "Profile Id"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Successful Response",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Profile"
+								}
+							}
+						}
+					},
+					"401": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						},
+						"description": "Unauthorized"
+					},
+					"403": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						},
+						"description": "Forbidden"
+					},
+					"409": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						},
+						"description": "Conflict"
+					},
+					"413": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						},
+						"description": "Content Too Large"
+					},
+					"422": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						},
+						"description": "Unprocessable Content"
+					},
+					"429": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						},
+						"description": "Too Many Requests"
+					},
+					"503": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						},
+						"description": "Service Unavailable"
+					}
+				}
+			}
+		},
 		"/api/v1/manifest/preview": {
 			"get": {
 				"summary": "Get Release Manifest Preview",
@@ -178,6 +1457,434 @@
 	},
 	"components": {
 		"schemas": {
+			"ApprovalResponse": {
+				"properties": {
+					"status": {
+						"type": "string",
+						"const": "approved",
+						"title": "Status"
+					}
+				},
+				"type": "object",
+				"required": [
+					"status"
+				],
+				"title": "ApprovalResponse"
+			},
+			"Approve": {
+				"properties": {
+					"requestId": {
+						"type": "string",
+						"pattern": "^[a-f0-9]{32}$",
+						"title": "Requestid"
+					}
+				},
+				"additionalProperties": false,
+				"type": "object",
+				"required": [
+					"requestId"
+				],
+				"title": "Approve"
+			},
+			"DeviceResponse": {
+				"properties": {
+					"deviceCode": {
+						"type": "string",
+						"title": "Devicecode"
+					},
+					"requestId": {
+						"type": "string",
+						"title": "Requestid"
+					},
+					"verificationUri": {
+						"type": "string",
+						"title": "Verificationuri"
+					},
+					"expiresIn": {
+						"type": "integer",
+						"title": "Expiresin"
+					},
+					"pollInterval": {
+						"type": "integer",
+						"title": "Pollinterval"
+					}
+				},
+				"type": "object",
+				"required": [
+					"deviceCode",
+					"requestId",
+					"verificationUri",
+					"expiresIn",
+					"pollInterval"
+				],
+				"title": "DeviceResponse"
+			},
+			"Empty": {
+				"properties": {},
+				"additionalProperties": false,
+				"type": "object",
+				"title": "Empty"
+			},
+			"ErrorDetail": {
+				"properties": {
+					"code": {
+						"type": "string",
+						"title": "Code"
+					},
+					"message": {
+						"type": "string",
+						"title": "Message"
+					}
+				},
+				"type": "object",
+				"required": [
+					"code",
+					"message"
+				],
+				"title": "ErrorDetail"
+			},
+			"ErrorResponse": {
+				"properties": {
+					"detail": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"$ref": "#/components/schemas/ErrorDetail"
+							}
+						],
+						"title": "Detail"
+					}
+				},
+				"type": "object",
+				"required": [
+					"detail"
+				],
+				"title": "ErrorResponse"
+			},
+			"Poll": {
+				"properties": {
+					"deviceCode": {
+						"type": "string",
+						"maxLength": 128,
+						"minLength": 32,
+						"pattern": "^[A-Za-z0-9_-]+$",
+						"title": "Devicecode"
+					}
+				},
+				"additionalProperties": false,
+				"type": "object",
+				"required": [
+					"deviceCode"
+				],
+				"title": "Poll"
+			},
+			"PollResponse": {
+				"properties": {
+					"status": {
+						"type": "string",
+						"enum": [
+							"pending",
+							"approved",
+							"expired",
+							"denied"
+						],
+						"title": "Status"
+					},
+					"accessToken": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Accesstoken"
+					},
+					"user": {
+						"anyOf": [
+							{
+								"$ref": "#/components/schemas/User"
+							},
+							{
+								"type": "null"
+							}
+						]
+					}
+				},
+				"type": "object",
+				"required": [
+					"status"
+				],
+				"title": "PollResponse"
+			},
+			"Profile": {
+				"properties": {
+					"id": {
+						"type": "string",
+						"title": "Id"
+					},
+					"name": {
+						"type": "string",
+						"title": "Name"
+					},
+					"description": {
+						"type": "string",
+						"title": "Description"
+					},
+					"visibility": {
+						"type": "string",
+						"enum": [
+							"private",
+							"public"
+						],
+						"title": "Visibility"
+					},
+					"owner": {
+						"$ref": "#/components/schemas/User"
+					},
+					"mods": {
+						"items": {
+							"$ref": "#/components/schemas/ProfileMod"
+						},
+						"type": "array",
+						"title": "Mods"
+					},
+					"sourceProfileId": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Sourceprofileid"
+					},
+					"updatedAt": {
+						"type": "string",
+						"title": "Updatedat"
+					}
+				},
+				"type": "object",
+				"required": [
+					"id",
+					"name",
+					"description",
+					"visibility",
+					"owner",
+					"mods",
+					"sourceProfileId",
+					"updatedAt"
+				],
+				"title": "Profile"
+			},
+			"ProfileCreate": {
+				"properties": {
+					"name": {
+						"type": "string",
+						"maxLength": 120,
+						"minLength": 1,
+						"title": "Name"
+					},
+					"description": {
+						"type": "string",
+						"maxLength": 4000,
+						"title": "Description"
+					},
+					"mods": {
+						"items": {
+							"$ref": "#/components/schemas/ProfileMod"
+						},
+						"type": "array",
+						"maxItems": 200,
+						"title": "Mods"
+					},
+					"sourceProfileId": {
+						"anyOf": [
+							{
+								"type": "string",
+								"pattern": "^[a-f0-9]{32}$"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Sourceprofileid"
+					}
+				},
+				"additionalProperties": false,
+				"type": "object",
+				"required": [
+					"name",
+					"description",
+					"mods"
+				],
+				"title": "ProfileCreate"
+			},
+			"ProfileMod": {
+				"properties": {
+					"name": {
+						"type": "string",
+						"maxLength": 120,
+						"minLength": 1,
+						"title": "Name"
+					},
+					"version": {
+						"type": "string",
+						"maxLength": 80,
+						"minLength": 1,
+						"title": "Version"
+					},
+					"sourceUrl": {
+						"type": "string",
+						"maxLength": 2048,
+						"minLength": 1,
+						"title": "Sourceurl"
+					},
+					"sha256": {
+						"type": "string",
+						"pattern": "^[a-fA-F0-9]{64}$",
+						"title": "Sha256"
+					}
+				},
+				"additionalProperties": false,
+				"type": "object",
+				"required": [
+					"name",
+					"version",
+					"sourceUrl",
+					"sha256"
+				],
+				"title": "ProfileMod"
+			},
+			"ProfilePatch": {
+				"properties": {
+					"name": {
+						"anyOf": [
+							{
+								"type": "string",
+								"maxLength": 120,
+								"minLength": 1
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Name"
+					},
+					"description": {
+						"anyOf": [
+							{
+								"type": "string",
+								"maxLength": 4000
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Description"
+					},
+					"mods": {
+						"anyOf": [
+							{
+								"items": {
+									"$ref": "#/components/schemas/ProfileMod"
+								},
+								"type": "array",
+								"maxItems": 200
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Mods"
+					},
+					"sourceProfileId": {
+						"anyOf": [
+							{
+								"type": "string",
+								"pattern": "^[a-f0-9]{32}$"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Sourceprofileid"
+					}
+				},
+				"additionalProperties": false,
+				"type": "object",
+				"title": "ProfilePatch"
+			},
+			"ProfilesResponse": {
+				"properties": {
+					"profiles": {
+						"items": {
+							"$ref": "#/components/schemas/Profile"
+						},
+						"type": "array",
+						"title": "Profiles"
+					}
+				},
+				"type": "object",
+				"required": [
+					"profiles"
+				],
+				"title": "ProfilesResponse"
+			},
+			"SessionResponse": {
+				"properties": {
+					"user": {
+						"anyOf": [
+							{
+								"$ref": "#/components/schemas/User"
+							},
+							{
+								"type": "null"
+							}
+						]
+					}
+				},
+				"type": "object",
+				"required": [
+					"user"
+				],
+				"title": "SessionResponse"
+			},
+			"User": {
+				"properties": {
+					"id": {
+						"type": "string",
+						"title": "Id"
+					},
+					"username": {
+						"type": "string",
+						"title": "Username"
+					},
+					"avatarUrl": {
+						"type": "string",
+						"title": "Avatarurl"
+					},
+					"roles": {
+						"items": {
+							"type": "string"
+						},
+						"type": "array",
+						"title": "Roles"
+					}
+				},
+				"type": "object",
+				"required": [
+					"id",
+					"username",
+					"avatarUrl",
+					"roles"
+				],
+				"title": "User"
+			},
 			"HTTPValidationError": {
 				"properties": {
 					"detail": {
