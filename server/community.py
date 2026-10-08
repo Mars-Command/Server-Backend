@@ -23,6 +23,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+if __package__:
+    from .capsules import initialize_capsules
+else:
+    from capsules import initialize_capsules
+
 SESSION_COOKIE = "mars_session"
 STATE_COOKIE = "mars_oauth_binding"
 DESKTOP_AUDIENCE = "mars-community-desktop"
@@ -179,6 +184,7 @@ class Store:
                     bucket TEXT PRIMARY KEY, window INTEGER NOT NULL, count INTEGER NOT NULL
                 );
             """)
+            initialize_capsules(db)
         finally:
             db.close()
         if os.name != "nt":

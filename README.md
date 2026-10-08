@@ -172,11 +172,46 @@ gate with client-provided flags/hashes. Configure scanning infrastructure, artif
 storage, provenance/license policies and Sponsors ownership/entitlement policy
 before implementing those later milestones.
 
+## Release-capsule foundations (internal only)
+
+`server.capsules.CapsuleRegistry` uses the existing community SQLite store.
+Each reservation gets a server-generated release ID and immutable uploader,
+project/version, declared source and creation time. Declared source is attribution
+metadata, not verified authorship, a license grant, or a URL to fetch. Backend
+callers must supply the authenticated uploader ID, never a request's owner field.
+No capsule HTTP endpoints are exposed in this increment.
+
+Reservations are pending and have no artifact checksum. The internal `observe`
+operation hashes a backend-observed byte stream within an explicit byte bound,
+then atomically binds the release once to that checksum-addressed artifact.
+It **does not upload or retain bytes**, validate a JAR, or perform a scan. A
+failed/empty/oversized observation leaves no binding or artifact record.
+Separate releases (including different uploaders or declarations) can share
+identical bytes without sharing release identity/provenance. Deduplication does
+not reset artifact state. Release metadata and artifact bindings cannot be edited;
+changed content or provenance requires a new release ID.
+
+Artifacts start `unscanned` and `unavailable`. The schema supports only negative
+scan states (`unscanned`, `pending`, `rejected`, `error`) and unavailable storage;
+there is no positive attestation setter. Both `require_publishable` and
+`require_downloadable` fail closed, including on missing artifacts. Even
+incompatible/forged positive database flags cannot bypass the final
+`capsule_integration_not_configured` gate. Hashes and client scan results are
+not accepted as evidence or metadata input. These gates are internal checks,
+not working publish/download operations or a substitute for API authorization.
+
+Next API integration is blocked on trusted binary ingestion and durable storage
+availability verification, backend-only scan attestations bound to exact bytes,
+and provenance/license/publication policy. Bucket, edge, queue and scanner
+decisions remain unresolved; none are selected here. Existing profile submission
+still returns `409 scanning_not_configured`; profile hashes remain untrusted
+metadata and the existing `/api/v1` package routes are unchanged.
+
 ## Tests
 
 ```powershell
 Set-Location 'D:\Documents\Personal-Projects\Mars-Command\mars-command-backend'
-& '.\.venv\Scripts\python.exe' -m pytest tests\test_community.py -q -p no:cacheprovider
+& '.\.venv\Scripts\python.exe' -m pytest tests\test_capsules.py tests\test_community.py -q -p no:cacheprovider
 ```
 
 Tests use disposable fixtures **inside this repository** and mocked GitHub HTTP
