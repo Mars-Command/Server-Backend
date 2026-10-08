@@ -1,5 +1,14 @@
 # Mars Command backend
 
+Backend release: **0.2.0**.
+
+`server/version.py` is the authoritative backend version source. FastAPI reads
+that value for the runtime and OpenAPI `info.version`; `output/openapi.json`
+must carry the same value. To prepare a backend release, update
+`BACKEND_VERSION` there, regenerate/verify the checked-in OpenAPI document, and
+run the full validation commands below. This backend version is independent of
+`MARS_PACK_VERSION` and does not change package manifest version semantics.
+
 The existing `/api/v1` package service remains unchanged. Batch 1 adds
 SQLite-backed GitHub login, explicit desktop authorization, and metadata-only
 community profiles under `/api/auth` and `/api/community`.
@@ -55,8 +64,10 @@ or a short/reused signing secret cause startup failure. OAuth start fails with
   Relative `MARS_COMMUNITY_DB` paths resolve against this repository, not cwd.
   Use a persistent local disk, restrict directory/WAL/backup permissions and
   encrypt disks/backups as needed. Do not use shared/network filesystems.
-  Connections use foreign keys, WAL, 10-second busy timeout and serialized
-  transactions. Windows filesystem ACLs must be configured by the operator.
+  Connections use foreign keys, required WAL mode, full synchronous durability,
+  a 10-second busy timeout and serialized transactions. Reopening an existing
+  community database installs missing internal capsule tables without replacing
+  community data. Windows filesystem ACLs must be configured by the operator.
 * Use a secret manager/environment injection; never commit `.env`, databases,
   tokens, credentials, or provider responses. Rotate the signing key to revoke
   all desktop tokens; website sessions require deleting their database records.
@@ -212,6 +223,8 @@ metadata and the existing `/api/v1` package routes are unchanged.
 ```powershell
 Set-Location 'D:\Documents\Personal-Projects\Mars-Command\mars-command-backend'
 & '.\.venv\Scripts\python.exe' -m pytest tests\test_capsules.py tests\test_community.py -q -p no:cacheprovider
+& '.\.venv\Scripts\python.exe' -m compileall -q server tests
+git diff --check
 ```
 
 Tests use disposable fixtures **inside this repository** and mocked GitHub HTTP

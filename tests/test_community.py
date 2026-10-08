@@ -16,6 +16,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from server import community as api
+from server.version import BACKEND_VERSION
 
 ROOT = Path(__file__).resolve().parent.parent
 WORK = ROOT / ".test-work"
@@ -510,6 +511,22 @@ def test_existing_pack_auth_and_routes_are_preserved(environment, monkeypatch):
     monkeypatch.setenv("DEV_TOKEN", "false")
     from server import main
     main = importlib.reload(main)
+    assert BACKEND_VERSION == "0.2.0"
+    assert main.app.version == BACKEND_VERSION
+    checked_in_openapi = json.loads(
+        (ROOT / "output" / "openapi.json").read_text(encoding="utf-8")
+    )
+    assert checked_in_openapi == main.app.openapi()
+    assert checked_in_openapi["info"]["version"] == BACKEND_VERSION
+    for path, media_type in {
+        "/api/v1/manifest.json": "application/json",
+        "/api/v1/manifest.json.sig": "text/plain",
+        "/api/v1/files/{relative_path}": "application/octet-stream",
+        "/api/v1/mods/{mod_id}/download": "application/java-archive",
+    }.items():
+        assert media_type in checked_in_openapi["paths"][path]["get"]["responses"]["200"][
+            "content"
+        ]
     monkeypatch.syspath_prepend(str(ROOT / "server"))
     legacy_module = importlib.import_module("main")
     assert legacy_module.app.title == "Mars Package API"

@@ -55,6 +55,38 @@ def test_pending_release_survives_reopen_and_cannot_publish_or_download(registry
     assert_blocked(reopened, release, "artifact_pending")
 
 
+def test_capsule_schema_migrates_on_reopen_without_losing_community_data(registry):
+    with registry.store.connect() as db:
+        db.execute(
+            "INSERT INTO profiles VALUES (?, ?, ?, ?, ?, 'private', NULL, ?)",
+            ("legacy-profile", ALICE, "Legacy", "", "[]", "2026-01-01"),
+        )
+        db.execute("DROP TABLE capsule_release_artifacts")
+        db.execute("DROP TABLE capsule_artifacts")
+        db.execute("DROP TABLE capsule_releases")
+
+    reopened = CapsuleRegistry(Store(registry.store.path))
+    with reopened.store.connect() as db:
+        assert db.execute(
+            "SELECT name FROM profiles WHERE id='legacy-profile'"
+        ).fetchone()[0] == "Legacy"
+        tables = {
+            row[0]
+            for row in db.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        assert {
+            "capsule_releases",
+            "capsule_artifacts",
+            "capsule_release_artifacts",
+        } <= tables
+        assert db.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+        assert db.execute("PRAGMA synchronous").fetchone()[0] == 2
+
+    assert reserve(reopened).artifact_sha256 is None
+
+
 def test_observed_checksum_deduplicates_bytes_not_release_or_provenance(registry):
     first = reserve(registry)
     second = reserve(registry, BOB, version="2.0", declared_source="Different declaration")

@@ -154,7 +154,12 @@ class Store:
         # journal_mode must be selected outside a transaction, including on reopen.
         db = sqlite3.connect(path, timeout=10)
         try:
-            db.execute("PRAGMA journal_mode=WAL")
+            db.execute("PRAGMA foreign_keys=ON")
+            mode = db.execute("PRAGMA journal_mode=WAL").fetchone()[0]
+            if mode.lower() != "wal":
+                raise RuntimeError("Community database requires SQLite WAL mode")
+            db.execute("PRAGMA synchronous=FULL")
+            db.execute("PRAGMA busy_timeout=10000")
             db.executescript("""
                 CREATE TABLE IF NOT EXISTS users (
                     id TEXT PRIMARY KEY, username TEXT NOT NULL, avatar_url TEXT NOT NULL,
@@ -195,6 +200,8 @@ class Store:
         db = sqlite3.connect(self.path, timeout=10)
         db.row_factory = sqlite3.Row
         db.execute("PRAGMA foreign_keys=ON")
+        db.execute("PRAGMA synchronous=FULL")
+        db.execute("PRAGMA busy_timeout=10000")
         try:
             # Serializes single-use state/device transitions across workers.
             db.execute("BEGIN IMMEDIATE")
@@ -912,7 +919,7 @@ def install_community(app: FastAPI, settings: Settings | None = None) -> None:
             return {"profiles": matches}
 
     @router.get("/api/community/profiles/mine", response_model=ProfilesResponse)
-    def my_profiles(user: Annotated[dict, Depends(cookie_identity)]):
+    def my_profiles(user: Annotated[dict, Depends(identity)]):
         with ready().connect() as db:
             rows = db.execute(
                 "SELECT * FROM profiles WHERE owner_id=? ORDER BY updated_at DESC LIMIT 100",

@@ -17,8 +17,10 @@ from pydantic import BaseModel, Field
 
 if __package__:
     from .community import install_community
+    from .version import BACKEND_VERSION
 else:
     from community import install_community
+    from version import BACKEND_VERSION
 
 DEV_TOKEN_ENABLED = os.environ.get("DEV_TOKEN", "").lower() == "true"
 
@@ -78,7 +80,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Mars Package API",
-    version="0.1.0",
+    version=BACKEND_VERSION,
     lifespan=lifespan,
 )
 bearer = HTTPBearer(auto_error=False)
@@ -477,7 +479,14 @@ def published_artifact_path(filename: str) -> Path:
     return path
 
 
-@app.get("/api/v1/manifest.json")
+@app.get(
+    "/api/v1/manifest.json",
+    response_class=FileResponse,
+    responses={
+        200: {"content": {"application/json": {}}},
+        503: {"description": "Signed release artifacts are unavailable"},
+    },
+)
 def published_manifest() -> FileResponse:
     return FileResponse(
         path=published_artifact_path("manifest.json"),
@@ -489,7 +498,14 @@ def published_manifest() -> FileResponse:
     )
 
 
-@app.get("/api/v1/manifest.json.sig")
+@app.get(
+    "/api/v1/manifest.json.sig",
+    response_class=FileResponse,
+    responses={
+        200: {"content": {"text/plain": {}}},
+        503: {"description": "Signed release artifacts are unavailable"},
+    },
+)
 def published_manifest_signature() -> FileResponse:
     return FileResponse(
         path=published_artifact_path("manifest.json.sig"),
@@ -501,7 +517,11 @@ def published_manifest_signature() -> FileResponse:
     )
 
 
-@app.get("/api/v1/files/{relative_path:path}")
+@app.get(
+    "/api/v1/files/{relative_path:path}",
+    response_class=FileResponse,
+    responses={200: {"content": {"application/octet-stream": {}}}},
+)
 def download_release_file(
     relative_path: str,
 ) -> FileResponse:
@@ -558,7 +578,11 @@ def list_mods(
     return ModListResponse(mods=entries)
 
 
-@app.get("/api/v1/mods/{mod_id}/download")
+@app.get(
+    "/api/v1/mods/{mod_id}/download",
+    response_class=FileResponse,
+    responses={200: {"content": {"application/java-archive": {}}}},
+)
 def download_mod(
     mod_id: str,
     _token: Annotated[dict, Depends(require_mars_client)],
