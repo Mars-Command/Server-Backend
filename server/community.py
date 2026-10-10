@@ -16,7 +16,7 @@ from urllib.parse import urlencode, urlsplit
 
 import httpx
 import jwt
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,8 +25,16 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 if __package__:
     from .capsules import initialize_capsules
+    from .ingestion import (
+        CapsuleBlocked, CapsuleResponse, CapsulesResponse, CapsuleWorkflow,
+        IngestionSettings, initialize_ingestion,
+    )
 else:
     from capsules import initialize_capsules
+    from ingestion import (
+        CapsuleBlocked, CapsuleResponse, CapsulesResponse, CapsuleWorkflow,
+        IngestionSettings, initialize_ingestion,
+    )
 
 SESSION_COOKIE = "mars_session"
 STATE_COOKIE = "mars_oauth_binding"
@@ -89,6 +97,7 @@ class Settings:
     github_client_id: str = ""
     github_client_secret: str = ""
     allow_local_http: bool = False
+    capsules: IngestionSettings | None = None
 
     @property
     def enabled(self) -> bool:
@@ -109,6 +118,8 @@ class Settings:
             raise ValueError("MARS_AUTH_JWT_SECRET must contain at least 32 characters")
         if not self.database:
             raise ValueError("MARS_COMMUNITY_DB must be set")
+        if self.capsules is None:
+            object.__setattr__(self, "capsules", IngestionSettings.for_database(self.database))
         object.__setattr__(
             self, "website_url", origin(self.website_url, self.allow_local_http)
         )
@@ -144,6 +155,7 @@ class Settings:
             github_client_secret=os.environ.get("GITHUB_CLIENT_SECRET", ""),
             allow_local_http=os.environ.get("MARS_AUTH_ALLOW_LOCAL_HTTP", "").lower()
             == "true",
+            capsules=IngestionSettings.for_database(database, environment=True) if secret else None,
         )
 
 
@@ -190,6 +202,7 @@ class Store:
                 );
             """)
             initialize_capsules(db)
+            initialize_ingestion(db)
         finally:
             db.close()
         if os.name != "nt":
@@ -319,6 +332,17 @@ class ProfileCreate(Input):
     sourceProfileId: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
 
 
+class CapsuleCreate(Input):
+    project: str = Field(min_length=1, max_length=120)
+    version: str = Field(min_length=1, max_length=80)
+    sourceUrl: str = Field(min_length=1, max_length=2048)
+
+    @field_validator("sourceUrl")
+    @classmethod
+    def safe_source(cls, value: str) -> str:
+        return ProfileMod.safe_source(value)
+
+
 class ProfilePatch(Input):
     name: str | None = Field(default=None, min_length=1, max_length=120)
     description: str | None = Field(default=None, max_length=4000)
@@ -409,6 +433,22 @@ class CommunityGuard:
             ("/api/auth/", "/api/community/")
         ):
             return await self.app(scope, receive, send)
+
+        async def private_send(message):
+            if message["type"] == "http.response.start":
+                message["headers"] = list(message["headers"]) + [
+                    (b"cache-control", b"no-store"),
+                    (b"x-content-type-options", b"nosniff"),
+                ]
+            await send(message)
+
+        # Only the authenticated raw-artifact route may bypass the bounded JSON buffer.
+        import re
+
+        if scope["method"] == "PUT" and re.fullmatch(
+            r"/api/community/capsules/[a-f0-9]{32}/artifact", scope["path"]
+        ):
+            return await self.app(scope, receive, private_send)
         chunks = []
         size = 0
         while True:
@@ -426,7 +466,7 @@ class CommunityGuard:
                     },
                     status_code=413,
                 )
-                return await response(scope, receive, send)
+                return await response(scope, receive, private_send)
             chunks.append(message)
             if not message.get("more_body", False):
                 break
@@ -435,14 +475,6 @@ class CommunityGuard:
             if chunks:
                 return chunks.pop(0)
             return await receive()
-
-        async def private_send(message):
-            if message["type"] == "http.response.start":
-                message["headers"] = list(message["headers"]) + [
-                    (b"cache-control", b"no-store"),
-                    (b"x-content-type-options", b"nosniff"),
-                ]
-            await send(message)
 
         await self.app(scope, replay, private_send)
 
@@ -503,19 +535,21 @@ def install_community(app: FastAPI, settings: Settings | None = None) -> None:
     store = Store(settings.database) if settings.enabled else None
     app.state.community_store = store
     app.state.community_settings = settings
+    workflow = CapsuleWorkflow(store, settings.capsules) if store and settings.capsules else None
+    app.state.capsule_workflow = workflow
     app.add_middleware(CommunityGuard)
     if settings.enabled:
         app.add_middleware(
             CORSMiddleware,
             allow_origins=[settings.website_url],
             allow_credentials=True,
-            allow_methods=["GET", "POST", "PATCH", "DELETE"],
-            allow_headers=["Content-Type", "Authorization"],
+            allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+            allow_headers=["Content-Type", "Authorization", "Idempotency-Key"],
         )
     router = APIRouter(
         responses={
             status: {"model": ErrorResponse}
-            for status in (401, 403, 409, 413, 422, 429, 503)
+            for status in (401, 403, 404, 408, 409, 413, 415, 422, 429, 503)
         }
     )
 
@@ -559,6 +593,28 @@ def install_community(app: FastAPI, settings: Settings | None = None) -> None:
         raise exc
 
     app.add_exception_handler(sqlite3.Error, storage_error)
+
+    async def capsule_error(request: Request, exc: Exception) -> Response:
+        if not request.url.path.startswith("/api/community/capsules"):
+            raise exc
+        if isinstance(exc, CapsuleBlocked):
+            code = exc.code
+            status = {
+                "release_not_found": 404, "invalid_input": 422,
+                "artifact_empty": 422, "artifact_invalid": 422,
+                "artifact_too_large": 413, "storage_unavailable": 503,
+                "artifact_unavailable": 503,
+            }.get(code, 409)
+        else:
+            code, status = "storage_unavailable", 503
+            logger.error("capsule_storage_failure")
+        return JSONResponse(
+            {"detail": {"code": code, "message": code.replace("_", " ").capitalize()}},
+            status_code=status,
+        )
+
+    app.add_exception_handler(CapsuleBlocked, capsule_error)
+    app.add_exception_handler(OSError, capsule_error)
 
     def ready() -> Store:
         if store is None:
@@ -627,6 +683,73 @@ def install_community(app: FastAPI, settings: Settings | None = None) -> None:
         if user is None:
             raise fail(401, "authentication_required", "Community login is required")
         return user
+
+    def capsules_ready() -> CapsuleWorkflow:
+        ready()
+        if workflow is None:
+            raise fail(503, "storage_unavailable", "Capsule storage is unavailable")
+        return workflow
+
+    def capsule_limit(user: dict, action: str):
+        ready().rate_limit(f"capsule-{action}:{digest(user['id'])}", 30)
+
+    @router.post("/api/community/capsules", response_model=CapsuleResponse, status_code=201)
+    def reserve_capsule(
+        body: CapsuleCreate, user: Annotated[dict, Depends(identity)],
+        idempotency_key: Annotated[str, Header(alias="Idempotency-Key", pattern=r"^[A-Za-z0-9._:-]{1,128}$")],
+    ):
+        capsule_limit(user, "reserve")
+        return capsules_ready().reserve(
+            user["id"], body.project, body.version, body.sourceUrl,
+            idempotency_key,
+        )
+
+    @router.get("/api/community/capsules/mine", response_model=CapsulesResponse)
+    def my_capsules(user: Annotated[dict, Depends(identity)]):
+        capsule_limit(user, "read")
+        return capsules_ready().mine(user["id"])
+
+    @router.get("/api/community/capsules/{release_id}", response_model=CapsuleResponse)
+    def get_capsule(release_id: str, user: Annotated[dict, Depends(identity)]):
+        capsule_limit(user, "read")
+        return capsules_ready().get(release_id, user["id"])
+
+    @router.put(
+        "/api/community/capsules/{release_id}/artifact", response_model=CapsuleResponse,
+        openapi_extra={"requestBody": {"required": True, "content": {
+            "application/java-archive": {"schema": {"type": "string", "format": "binary"}},
+            "application/octet-stream": {"schema": {"type": "string", "format": "binary"}},
+        }}},
+    )
+    async def upload_capsule(release_id: str, request: Request, user: Annotated[dict, Depends(identity)]):
+        capsule_limit(user, "upload")
+        capsules = capsules_ready()
+        # Ownership precedes media checks and consumption of untrusted bytes.
+        capsules.get(release_id, user["id"])
+        if request.headers.get("content-type", "").split(";", 1)[0].strip().lower() not in {
+            "application/java-archive", "application/octet-stream",
+        }:
+            raise fail(415, "unsupported_media_type", "Send a raw JAR, not multipart data")
+        length = request.headers.get("content-length")
+        if length is not None:
+            if not length.isascii() or not length.isdigit():
+                raise fail(422, "invalid_input", "Invalid Content-Length")
+            if int(length) > capsules.settings.max_bytes:
+                raise CapsuleBlocked("artifact_too_large")
+        try:
+            return await capsules.upload(release_id, user["id"], request.stream())
+        except TimeoutError:
+            raise fail(408, "upload_timeout", "Upload timed out; retry the same reservation")
+
+    @router.post("/api/community/capsules/{release_id}/retry", response_model=CapsuleResponse)
+    def retry_capsule(release_id: str, user: Annotated[dict, Depends(identity)]):
+        capsule_limit(user, "retry")
+        return capsules_ready().retry(release_id, user["id"])
+
+    @router.post("/api/community/capsules/{release_id}/withdraw", response_model=CapsuleResponse)
+    def withdraw_capsule(release_id: str, user: Annotated[dict, Depends(identity)]):
+        capsule_limit(user, "withdraw")
+        return capsules_ready().withdraw(release_id, user["id"])
 
     def callback_redirect(
         result: str, request_id: str | None, error: str | None = None

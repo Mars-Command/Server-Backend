@@ -1,6 +1,6 @@
 # Mars Command backend
 
-Backend release: **0.2.0**.
+Backend release: **0.3.0**.
 
 `server/version.py` is the authoritative backend version source. FastAPI reads
 that value for the runtime and OpenAPI `info.version`; `output/openapi.json`
@@ -177,56 +177,121 @@ Errors follow `{detail:string|{code,message}}`; invalid input is a sanitized 422
 {"detail":{"code":"scanning_not_configured","message":"Publishing requires backend-validated mods; scanning is not configured"}}
 ```
 
-Even empty profiles fail. There is no upload, download, scan registry, Sponsors
-lookup, entitlement assignment or public publishing workflow. Do not bypass the
-gate with client-provided flags/hashes. Configure scanning infrastructure, artifact
-storage, provenance/license policies and Sponsors ownership/entitlement policy
-before implementing those later milestones.
+Even empty profiles fail. Capsule ingestion below is separate from profile
+publication. There is no public capsule download, Sponsors lookup, entitlement
+assignment or public publishing workflow. Never trust client scan flags/hashes.
 
-## Release-capsule foundations (internal only)
+## Private capsule ingestion (Batch 3)
 
-`server.capsules.CapsuleRegistry` uses the existing community SQLite store.
-Each reservation gets a server-generated release ID and immutable uploader,
-project/version, declared source and creation time. Declared source is attribution
-metadata, not verified authorship, a license grant, or a URL to fetch. Backend
-callers must supply the authenticated uploader ID, never a request's owner field.
-No capsule HTTP endpoints are exposed in this increment.
+Community authentication is required for every capsule endpoint. Website cookies
+retain exact-Origin protection on mutations; native clients use the existing
+community bearer, never a package token. Owner mismatches return 404.
 
-Reservations are pending and have no artifact checksum. The internal `observe`
-operation hashes a backend-observed byte stream within an explicit byte bound,
-then atomically binds the release once to that checksum-addressed artifact.
-It **does not upload or retain bytes**, validate a JAR, or perform a scan. A
-failed/empty/oversized observation leaves no binding or artifact record.
-Separate releases (including different uploaders or declarations) can share
-identical bytes without sharing release identity/provenance. Deduplication does
-not reset artifact state. Release metadata and artifact bindings cannot be edited;
-changed content or provenance requires a new release ID.
+| Method/path | Input/result |
+| --- | --- |
+| POST `/api/community/capsules` | `{project,version,sourceUrl}` + required `Idempotency-Key` header → 201 Capsule |
+| GET `/api/community/capsules/mine` | `{capsules:Capsule[]}`, newest 100 owned releases |
+| GET `/api/community/capsules/{release_id}` | Capsule, owner only |
+| PUT `/api/community/capsules/{release_id}/artifact` | raw `application/java-archive` or `application/octet-stream` → Capsule |
+| POST `/api/community/capsules/{release_id}/retry` | no body → Capsule |
+| POST `/api/community/capsules/{release_id}/withdraw` | no body → Capsule |
 
-Artifacts start `unscanned` and `unavailable`. The schema supports only negative
-scan states (`unscanned`, `pending`, `rejected`, `error`) and unavailable storage;
-there is no positive attestation setter. Both `require_publishable` and
-`require_downloadable` fail closed, including on missing artifacts. Even
-incompatible/forged positive database flags cannot bypass the final
-`capsule_integration_not_configured` gate. Hashes and client scan results are
-not accepted as evidence or metadata input. These gates are internal checks,
-not working publish/download operations or a substitute for API authorization.
+Project is trimmed, 1–120 characters; version is trimmed, 1–80; source is
+1–2,048 and must pass the public HTTPS rules above. Hostnames must contain a dot
+and cannot be `localhost`, `.localhost` or `.local`; backslashes and characters
+below ASCII 33 or ASCII 127 are forbidden. IP literals must be globally routable.
+Metadata is never fetched or DNS-resolved and does not establish license/authorship.
+Extra metadata fields (including owner, hash or scan verdict) are rejected.
+Idempotency keys match `[A-Za-z0-9._:-]{1,128}`, scoped to owner. Replaying identical
+metadata returns the same release (201); changed metadata returns `idempotency_conflict`.
 
-Next API integration is blocked on trusted binary ingestion and durable storage
-availability verification, backend-only scan attestations bound to exact bytes,
-and provenance/license/publication policy. Bucket, edge, queue and scanner
-decisions remain unresolved; none are selected here. Existing profile submission
-still returns `409 scanning_not_configured`; profile hashes remain untrusted
-metadata and the existing `/api/v1` package routes are unchanged.
+Capsule fields: `releaseId` (32 lowercase hex), `ownerId`, `project`, `version`,
+`sourceUrl`, `createdAt`, `artifactSha256` (64 lowercase hex or null), `state`,
+`revision` (positive, monotonic), `updatedAt`, `evidence`, `queue`, and
+`publicDownloadAvailable` (**always false**). Timestamps are ISO UTC strings.
+Queue is null before binding, otherwise `{status,attempts,maxAttempts,nextAttemptAt,lastError}`.
+Status is `pending|leased|complete|blocked|failed`; attempt counts are nonnegative.
+`nextAttemptAt` is null unless pending; errors are sanitized machine codes.
+Evidence is null before a result, otherwise `{version,artifactSha256,provider,
+providerResultId,policyVersion,scannedAt,expiresAt,verdict,summary}`. Verdict is
+`accepted|rejected|blocked|error`; result identifiers and summaries are normalized
+nonempty machine codes. Responses never expose paths, lease tokens, raw references,
+provider credentials or a download URL. `output/openapi.json` is authoritative.
+
+State flow: `reserved → uploading → quarantined → scan_pending`, then `scan_blocked`,
+`rejected` or `publishable`. Interrupted/invalid uploads return to `reserved`.
+Identical-byte upload retries return current status; different bytes cannot rebind
+a release (`release_already_bound`). `scan_blocked` retries require available
+quarantine bytes, a non-leased job and remaining attempt budget; `scan_pending`
+pending/leased retries are idempotent. Rejected releases cannot retry. Withdrawal
+is idempotent and supports any nonexpired unpublished state (including uploading
+and publishable). Expired/withdrawn releases cannot upload. Immutable release facts
+and bindings survive deduplication; digest/policy jobs are shared, not ownership.
+
+Errors use `{detail:{code,message}}`: 409 `idempotency_conflict`,
+`upload_in_progress`, `release_already_bound`, `invalid_state`, `submission_limit`,
+`retry_not_eligible`; 404 `release_not_found`; 413 `artifact_too_large`; 422
+`invalid_input`, `artifact_empty`, `artifact_invalid`; 415 `unsupported_media_type`;
+408 `upload_timeout`; 503 `storage_unavailable`, `artifact_unavailable`, plus existing
+authentication/rate errors. Owner mutations/reads are limited to 30/action/minute.
+
+### Storage and worker operation
+
+Default private buckets are `<database parent>\capsule-private\quarantine`,
+`\retained`, and `\evidence`; environment overrides must be absolute, nonoverlapping
+and outside public/static/output/dist/package release directories. Links/junctions
+in bucket ancestors are rejected. Startup creates protected Windows DACLs allowing
+only the service account and SYSTEM (POSIX directories 0700, files 0600). Use the
+same service identity for API and worker. Do not configure static servers, proxies,
+CDNs or package routes to serve these buckets. Restrict disk access and execution
+with OS/container policy; an upload is never loaded/executed by the backend.
+
+Uploads are streamed, SHA-256 computed from observed bytes, bounded while reading,
+validated without ZIP extraction, fsynced and atomically moved. Unsafe member paths,
+symlinks, encrypted entries, duplicate names, CRC failures, more than 10,000 entries,
+over 4× configured expanded size or over 100× compression ratio are rejected.
+An archive needs at least a `.class` or `META-INF/MANIFEST.MF` member.
+Defaults: 64 MiB, 10 active releases/owner, 7-day abandoned/failed expiry, 300s upload
+timeout/worker lease, 3 attempts, 30s exponential retry (capped 3,600s), 24h evidence TTL.
+All limits must be positive bounded integers. See `.env.example` for overrides.
+
+Run separately with the same community/database/bucket configuration:
+
+```powershell
+& '.\.venv\Scripts\python.exe' -m server.worker --once
+& '.\.venv\Scripts\python.exe' -m server.worker --poll-seconds 5 --worker-id worker-1
+```
+
+The first cleans up/processes at most one job; the second loops until SIGINT/SIGTERM.
+SQLite atomically leases jobs, fences stale completions and records attempts,
+versioned immutable evidence and state history. Expired leases recover with bounded
+backoff; exhausted attempts preserve failure reasons. Cleanup expires abandoned
+reservations/failed states and removes old artifacts only without another live
+release/lease; raw evidence is retained for audit. Back up and restore the SQLite
+database **and all three buckets together**, with API/worker stopped or a coordinated
+consistent snapshot; do not copy an active database without its WAL. Keep persistent
+single-host local disk (no unsupported shared/network filesystem). Restores with
+missing/modified bytes fail eligibility checks rather than trusting database flags.
+
+Only `MARS_CAPSULE_SCANNER=disabled` is permitted in production. The worker records
+`blocked` / `scanning_not_configured`, never a clean result. Test scanners are
+injected only by tests; configuring `clean` or another adapter fails startup.
+`publishable` requires exact digest/current policy, trusted backend-generated accepted
+evidence within TTL, source metadata and hash-verified retained bytes. It means
+future eligibility, **not public availability**. The legacy `CapsuleRegistry`
+keeps its negative-only gates; no capsule download/install/publication endpoint
+or profile-publication bypass is added. Provider usage rights, provenance/license
+policy and real scanner integration remain deferred.
 
 ## Tests
 
 ```powershell
 Set-Location 'D:\Documents\Personal-Projects\Mars-Command\mars-command-backend'
-& '.\.venv\Scripts\python.exe' -m pytest tests\test_capsules.py tests\test_community.py -q -p no:cacheprovider
+& '.\.venv\Scripts\python.exe' -m pytest tests\test_capsules.py tests\test_community.py tests\test_ingestion.py -q -p no:cacheprovider
 & '.\.venv\Scripts\python.exe' -m compileall -q server tests
 git diff --check
 ```
 
 Tests use disposable fixtures **inside this repository** and mocked GitHub HTTP
-responses. No credentials, real OAuth calls, uploads or remote source fetches.
-See `sub_report-backend.md` for exact executed commands/results and blockers.
+responses and private local JAR fixtures. No real credentials, OAuth calls, scanner
+calls or remote source fetches. See `doc\reports\batch-3-backend.md` for results.

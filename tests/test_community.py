@@ -511,7 +511,7 @@ def test_existing_pack_auth_and_routes_are_preserved(environment, monkeypatch):
     monkeypatch.setenv("DEV_TOKEN", "false")
     from server import main
     main = importlib.reload(main)
-    assert BACKEND_VERSION == "0.2.0"
+    assert BACKEND_VERSION == "0.3.0"
     assert main.app.version == BACKEND_VERSION
     checked_in_openapi = json.loads(
         (ROOT / "output" / "openapi.json").read_text(encoding="utf-8")
