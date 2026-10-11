@@ -262,6 +262,9 @@ Run separately with the same community/database/bucket configuration:
 & '.\.venv\Scripts\python.exe' -m server.worker --poll-seconds 5 --worker-id worker-1
 ```
 
+The worker loads `.env.local`, then `.env`, from the backend root. Existing
+process environment variables take precedence; `.env.example` is a template only.
+
 The first cleans up/processes at most one job; the second loops until SIGINT/SIGTERM.
 SQLite atomically leases jobs, fences stale completions and records attempts,
 versioned immutable evidence and state history. Expired leases recover with bounded

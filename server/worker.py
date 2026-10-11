@@ -3,16 +3,31 @@
 import argparse
 import json
 import logging
+import os
 import signal
 import threading
+from pathlib import Path
+
+from dotenv import load_dotenv
 
 from .community import Settings, Store
 from .ingestion import CapsuleWorkflow
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+
+def load_environment() -> None:
+    load_dotenv(PROJECT_ROOT / ".env.local")
+    load_dotenv(PROJECT_ROOT / ".env")
+
 
 class DiagnosticFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
-        event = {"level": record.levelname, "logger": record.name, "event": record.getMessage()}
+        event = {
+            "level": record.levelname,
+            "logger": record.name,
+            "event": record.getMessage(),
+        }
         for key in ("job_id", "attempts", "state", "target"):
             if hasattr(record, key):
                 event[key] = getattr(record, key)
@@ -20,8 +35,12 @@ class DiagnosticFormatter(logging.Formatter):
 
 
 def main() -> int:
+    load_environment()
+
     parser = argparse.ArgumentParser(description="Private capsule scanner worker")
-    parser.add_argument("--once", action="store_true", help="Clean up and process at most one job")
+    parser.add_argument(
+        "--once", action="store_true", help="Clean up and process at most one job"
+    )
     parser.add_argument("--poll-seconds", type=int, default=5)
     parser.add_argument("--worker-id", default="capsule-worker")
     args = parser.parse_args()

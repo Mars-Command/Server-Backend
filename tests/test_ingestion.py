@@ -550,3 +550,30 @@ def test_diagnostic_formatter_only_emits_allowed_context():
     output = DiagnosticFormatter().format(record)
     assert '"job_id": 1' in output and '"attempts": 3' in output
     assert "do-not-log" not in output
+
+
+def test_worker_loads_env_files_without_overriding_process_environment(tmp_path, monkeypatch):
+    from server import worker
+
+    monkeypatch.setattr(worker, "PROJECT_ROOT", tmp_path)
+    monkeypatch.delenv("MARS_AUTH_JWT_SECRET", raising=False)
+    monkeypatch.delenv("WEBSITE_URL", raising=False)
+    monkeypatch.setenv("MARS_COMMUNITY_DB", "process.sqlite3")
+    (tmp_path / ".env").write_text(
+        "MARS_AUTH_JWT_SECRET=base-secret\n"
+        "WEBSITE_URL=https://base.example.com\n"
+        "MARS_COMMUNITY_DB=base.sqlite3\n",
+        encoding="utf-8",
+    )
+    (tmp_path / ".env.local").write_text(
+        "MARS_AUTH_JWT_SECRET=local-secret\n"
+        "WEBSITE_URL=https://local.example.com\n"
+        "MARS_COMMUNITY_DB=local.sqlite3\n",
+        encoding="utf-8",
+    )
+
+    worker.load_environment()
+
+    assert os.environ["MARS_AUTH_JWT_SECRET"] == "local-secret"
+    assert os.environ["WEBSITE_URL"] == "https://local.example.com"
+    assert os.environ["MARS_COMMUNITY_DB"] == "process.sqlite3"
