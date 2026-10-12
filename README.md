@@ -286,11 +286,62 @@ keeps its negative-only gates; no capsule download/install/publication endpoint
 or profile-publication bypass is added. Provider usage rights, provenance/license
 policy and real scanner integration remain deferred.
 
+## Minecraft player arrival
+
+Minecraft arrival reuses the same GitHub OAuth start/callback and website
+session, but has a separate authorization purpose from desktop launcher login.
+Deploy the updated backend and website together before enabling it on a server.
+
+Set `MARS_MINECRAFT_SERVER_TOKEN` to a separate random URL-safe ASCII value of
+32..128 characters, and inject the matching value into the Minecraft server
+process. It is not a package/community JWT, browser credential, or public player
+ID. Never put it in `VITE_*`, URLs, client config, or source control.
+
+| Method/path | Authorization / body | Result |
+| --- | --- | --- |
+| GET `/api/auth/requests/{request_id}` | website cookie | Server-derived `desktop`/`minecraft` purpose, status, callsign/name for arrival requests |
+| POST `/api/auth/minecraft/arrival` | server bearer credential; `{minecraftUuid, playerName}` | Permanent callsign and confirmed context, or a bound pending challenge |
+| POST `/api/auth/minecraft/poll` | server bearer credential; `{minecraftUuid, deviceCode}` | `pending`, approved account name, `expired`, or `denied`; never a JWT |
+| POST `/api/auth/minecraft/approve` | website cookie + exact Origin; `{requestId}` | Browser approval only; does not finalize player linking |
+| POST `/api/auth/minecraft/confirm` | server bearer credential; `{minecraftUuid, deviceCode, expectedAccountName}` | Finalizes the in-game-reviewed identity atomically |
+| GET `/api/auth/minecraft/context/{minecraft_uuid}` | server bearer credential | Limited player context |
+
+The UUID is canonical lowercase Minecraft UUID text, not a shortened UUID.
+Calls are accepted only from trusted server integrations; enable Minecraft
+`online-mode=true` to establish player ownership. API credentials trust the
+operator's server, not a public caller supplying someone else's UUID.
+
+Callsigns are permanent four-digit strings (`0000`..`9999`) allocated under the
+existing serialized SQLite transaction with a uniqueness constraint. The
+10,000-ID capacity fails explicitly rather than recycling identities.
+Registration of the same UUID preserves its callsign, including after restarts.
+Minecraft linking is one website account to one Minecraft UUID; conflicting
+links are rejected, not overwritten. Back up the registry with the community DB.
+
+Challenges are random, hashed in storage, UUID-bound, expire after 10 minutes,
+and are invalidated when a new link starts. Only the server receives `deviceCode`.
+The website verification URL carries only the opaque `requestId`. Website
+approval names the current authenticated account; in-game finalization checks
+the reviewed account name and consumes the challenge once. Forwarding a URL
+alone cannot finalize the Minecraft account link.
+
+Minecraft-purpose requests cannot use desktop approval/polling to obtain a
+community token. Cookie approval cannot be replaced with a server bearer key,
+and server operations reject browser-marked requests. Existing pack, desktop,
+and community authorization behavior remains separate.
+
+Context is restricted to `{minecraftUuid, callSign, confirmed, accountName,
+roles}`. Roles are server-stored and bounded; no private profiles, artifacts,
+provider secrets, session tokens, or avatar data are returned. This supports
+future Moon context but does not run a model or grant Minecraft operator rights.
+Operational account recovery/rebinding is not an automatic endpoint in this
+milestone.
+
 ## Tests
 
 ```powershell
 Set-Location 'D:\Documents\Personal-Projects\Mars-Command\mars-command-backend'
-& '.\.venv\Scripts\python.exe' -m pytest tests\test_capsules.py tests\test_community.py tests\test_ingestion.py -q -p no:cacheprovider
+& '.\.venv\Scripts\python.exe' -m pytest tests\test_capsules.py tests\test_community.py tests\test_ingestion.py tests\test_minecraft.py -q -p no:cacheprovider
 & '.\.venv\Scripts\python.exe' -m compileall -q server tests
 git diff --check
 ```
