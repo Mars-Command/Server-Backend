@@ -3,7 +3,10 @@ import json
 import logging
 import os
 import re
+import sqlite3
+import threading
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Annotated, Any, Literal
@@ -17,9 +20,11 @@ from pydantic import BaseModel, Field
 
 if __package__:
     from .community import install_community
+    from .release_publishing import PublishSettings, install_publishing
     from .version import BACKEND_VERSION
 else:
     from community import install_community
+    from release_publishing import PublishSettings, install_publishing
     from version import BACKEND_VERSION
 
 DEV_TOKEN_ENABLED = os.environ.get("DEV_TOKEN", "").lower() == "true"
@@ -62,7 +67,7 @@ if not RELEASE_DIR.is_dir():
 if not MODS_DIR.is_dir():
     raise RuntimeError(f"Mods directory does not exist: {MODS_DIR}")
 
-JWT_SECRET = os.environ.get("MARS_API_JWT_SECRET")
+JWT_SECRET = os.environ.get("MARS_API_JWT_SECRET", "")
 JWT_ALGORITHM = "HS256"
 JWT_AUDIENCE = "mars-client"
 JWT_ISSUER = "mars-package-api"
@@ -73,8 +78,10 @@ if not JWT_SECRET:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    app.state.mods = build_mod_inventory()
-    app.state.manifest, app.state.release_files = build_release_manifest(app.state.mods)
+    app.state.package_snapshot = load_package_snapshot(RELEASE_DIR)
+    app.state.package_snapshot_id = None
+    app.state.package_snapshot_lock = threading.RLock()
+    current_package_snapshot()
     yield
 
 
@@ -125,16 +132,24 @@ class ReleaseManifest(BaseModel):
     curseforgeMods: list[dict[str, Any]] = Field(default_factory=list)
     modsDir: str | None = "mods"
 
+@dataclass(frozen=True)
+class PackageSnapshot:
+    root: Path
+    mods: dict[str, dict[str, Any]]
+    manifest: ReleaseManifest
+    files: dict[str, Path]
 
-def load_mod_metadata() -> dict[str, dict[str, object]]:
-    if not MODS_METADATA_PATH.is_file():
+
+def load_mod_metadata(root: Path = RELEASE_DIR) -> dict[str, dict[str, object]]:
+    metadata_path = root / "mods.json"
+    if not metadata_path.is_file():
         return {}
 
     try:
-        data = json.loads(MODS_METADATA_PATH.read_text(encoding="utf-8"))
+        data = json.loads(metadata_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise RuntimeError(
-            f"Could not read mod metadata {MODS_METADATA_PATH}: {exc}"
+            f"Could not read mod metadata {metadata_path}: {exc}"
         ) from exc
 
     if not isinstance(data, dict):
@@ -170,8 +185,9 @@ def load_mod_metadata() -> dict[str, dict[str, object]]:
     return metadata
 
 
-def load_mods() -> dict[str, dict[str, str]]:
-    metadata = load_mod_metadata()
+def load_mods(root: Path = RELEASE_DIR, metadata_root: Path | None = None) -> dict[str, dict[str, str]]:
+    mods_dir = root / "mods"
+    metadata = load_mod_metadata(metadata_root if metadata_root is not None else root)
     mods: dict[str, dict[str, str]] = {}
     id_pattern = re.compile(r"[a-z0-9][a-z0-9_-]*")
     version_pattern = re.compile(
@@ -179,7 +195,7 @@ def load_mods() -> dict[str, dict[str, str]]:
         re.IGNORECASE,
     )
 
-    for path in sorted(MODS_DIR.iterdir(), key=lambda item: item.name.casefold()):
+    for path in sorted(mods_dir.iterdir(), key=lambda item: item.name.casefold()):
         if path.is_symlink() or not path.is_file() or path.suffix.lower() != ".jar":
             continue
 
@@ -205,7 +221,7 @@ def load_mods() -> dict[str, dict[str, str]]:
         if not isinstance(version, str) or not version.strip():
             raise RuntimeError(f"Invalid mod version for {path.name}")
         if mod_id in mods:
-            raise RuntimeError(f"Duplicate mod id {mod_id!r} in {MODS_DIR}")
+            raise RuntimeError(f"Duplicate mod id {mod_id!r} in {mods_dir}")
 
         mods[mod_id] = {
             "id": mod_id,
@@ -230,12 +246,14 @@ def sha256_file(path: Path) -> str:
 logger = logging.getLogger("mars-package-api")
 
 
-def build_mod_inventory() -> dict[str, dict[str, Any]]:
-    mods = load_mods()
+def build_mod_inventory(
+    root: Path = RELEASE_DIR, metadata_root: Path | None = None,
+) -> dict[str, dict[str, Any]]:
+    mods = load_mods(root, metadata_root)
     inventory: dict[str, dict[str, Any]] = {}
 
     for mod_id, mod in mods.items():
-        path = resolve_mod_path(mod)
+        path = resolve_mod_path(mod, root)
         stat = path.stat()
         inventory[mod_id] = {
             **mod,
@@ -244,13 +262,13 @@ def build_mod_inventory() -> dict[str, dict[str, Any]]:
         }
 
     if not inventory:
-        raise RuntimeError(f"No .jar files found in: {MODS_DIR}")
+        raise RuntimeError(f"No .jar files found in: {root / 'mods'}")
 
-    logger.info("Loaded %d mod(s) from %s", len(inventory), MODS_DIR)
+    logger.info("Loaded %d mod(s) from %s", len(inventory), root / "mods")
     return inventory
 
 
-def safe_release_path(relative_path: str) -> Path:
+def safe_release_path(relative_path: str, root: Path = RELEASE_DIR) -> Path:
     parts = relative_path.split("/")
     if (
         not relative_path
@@ -262,16 +280,16 @@ def safe_release_path(relative_path: str) -> Path:
     ):
         raise ValueError(f"Unsafe release path: {relative_path}")
 
-    path = RELEASE_DIR
+    path = root
     for part in parts:
         path = path / part
-        if path.is_symlink():
+        if path.is_symlink() or path.is_junction():
             raise ValueError(
                 f"Symlinks are not allowed in release paths: {relative_path}"
             )
 
     resolved = path.resolve()
-    if RELEASE_DIR not in resolved.parents:
+    if root not in resolved.parents:
         raise ValueError(f"Release path escapes the release directory: {relative_path}")
 
     return resolved
@@ -279,10 +297,11 @@ def safe_release_path(relative_path: str) -> Path:
 
 def build_release_manifest(
     mods: dict[str, dict[str, Any]],
+    root: Path = RELEASE_DIR,
 ) -> tuple[ReleaseManifest, dict[str, Path]]:
     for directory in (*MANAGED_DIRS, *MUTABLE_DIRS):
         try:
-            safe_release_path(directory)
+            safe_release_path(directory, root)
         except ValueError as exc:
             raise RuntimeError(str(exc)) from exc
 
@@ -293,7 +312,7 @@ def build_release_manifest(
         if relative_path in release_files:
             return
         try:
-            safe_path = safe_release_path(relative_path)
+            safe_path = safe_release_path(relative_path, root)
         except ValueError as exc:
             raise RuntimeError(str(exc)) from exc
         if not safe_path.is_file():
@@ -304,7 +323,7 @@ def build_release_manifest(
         raise RuntimeError(f"Could not scan managed release files: {error}") from error
 
     for directory in MANAGED_DIRS:
-        base = safe_release_path(directory)
+        base = safe_release_path(directory, root)
         if not base.exists():
             continue
         if not base.is_dir():
@@ -319,13 +338,13 @@ def build_release_manifest(
             subdirectories[:] = sorted(
                 name
                 for name in subdirectories
-                if not (current_path / name).is_symlink()
+                if not (current_path / name).is_symlink() and not (current_path / name).is_junction()
             )
             for filename in sorted(filenames, key=str.casefold):
                 path = current_path / filename
                 if path.is_symlink() or not path.is_file():
                     continue
-                relative_path = path.relative_to(RELEASE_DIR).as_posix()
+                relative_path = path.relative_to(root).as_posix()
                 add_file(relative_path)
 
     files: list[ReleaseFile] = []
@@ -363,14 +382,15 @@ def build_release_manifest(
         files=files,
         modsDir="mods",
     )
-    logger.info("Loaded %d release file(s) from %s", len(files), RELEASE_DIR)
+    logger.info("Loaded %d release file(s) from %s", len(files), root)
     return manifest, release_files
 
 
-def resolve_mod_path(mod: dict[str, str]) -> Path:
-    path = (MODS_DIR / mod["filename"]).resolve()
+def resolve_mod_path(mod: dict[str, Any], root: Path = RELEASE_DIR) -> Path:
+    mods_dir = root / "mods"
+    path = (mods_dir / mod["filename"]).resolve()
 
-    if MODS_DIR.resolve() not in path.parents or not path.is_file():
+    if mods_dir.resolve() not in path.parents or not path.is_file():
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Mod file is unavailable",
@@ -380,7 +400,8 @@ def resolve_mod_path(mod: dict[str, str]) -> Path:
 
 
 def get_mod_path(mod_id: str) -> tuple[dict[str, Any], Path]:
-    mod = app.state.mods.get(mod_id)
+    snapshot = current_package_snapshot()
+    mod = snapshot.mods.get(mod_id)
 
     if not mod:
         raise HTTPException(
@@ -388,7 +409,41 @@ def get_mod_path(mod_id: str) -> tuple[dict[str, Any], Path]:
             detail="Unknown mod",
         )
 
-    return mod, resolve_mod_path(mod)
+    return mod, resolve_mod_path(mod, snapshot.root)
+
+
+def load_package_snapshot(root: Path, published: bool = False) -> PackageSnapshot:
+    mods = build_mod_inventory(root, metadata_root=RELEASE_DIR)
+    manifest, files = build_release_manifest(mods, root)
+    if published:
+        signed = ReleaseManifest.model_validate_json((root / "manifest.json").read_bytes())
+        expected = {entry.path: (entry.sha256, entry.size) for entry in signed.files}
+        actual = {entry.path: (entry.sha256, entry.size) for entry in manifest.files}
+        if expected != actual:
+            raise RuntimeError("Published inventory differs from its signed manifest")
+        manifest = signed
+    return PackageSnapshot(root=root, mods=mods, manifest=manifest, files=files)
+
+
+def current_package_snapshot() -> PackageSnapshot:
+    publisher = app.state.release_publisher
+    try:
+        identifier, root = publisher.active_root() if publisher else (None, RELEASE_DIR)
+        with app.state.package_snapshot_lock:
+            if identifier != app.state.package_snapshot_id:
+                app.state.package_snapshot = load_package_snapshot(root, published=True)
+                app.state.package_snapshot_id = identifier
+            return app.state.package_snapshot
+    except (OSError, sqlite3.Error, RuntimeError, ValueError):
+        logger.error("The active release could not be loaded; refusing to serve a stale release")
+        raise HTTPException(status_code=503, detail="Active release storage is unavailable")
+
+
+app.state.release_publisher = install_publishing(
+    app,
+    PublishSettings.from_env(RELEASE_DIR, MANAGED_DIRS, MINECRAFT_VERSION, LOADER, LOADER_VERSION),
+    lambda root: load_package_snapshot(root, published=True),
+)
 
 
 def require_mars_client(
@@ -452,20 +507,24 @@ def get_release_manifest(
             detail="MARS_PUBLIC_BASE_URL must be a public HTTPS base URL",
         )
 
+    snapshot = current_package_snapshot()
     files = [
         item.model_copy(
             update={
-                "downloadUrl": f"{PUBLIC_API_BASE_URL}{item.downloadUrl}",
+                "downloadUrl": (
+                    f"{PUBLIC_API_BASE_URL}{item.downloadUrl}"
+                    if item.downloadUrl.startswith("/") else item.downloadUrl
+                ),
             }
         )
-        for item in app.state.manifest.files
+        for item in snapshot.manifest.files
     ]
-    return app.state.manifest.model_copy(update={"files": files})
+    return snapshot.manifest.model_copy(update={"files": files})
 
 
 def published_artifact_path(filename: str) -> Path:
     try:
-        path = safe_release_path(filename)
+        path = safe_release_path(filename, current_package_snapshot().root)
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -492,7 +551,7 @@ def published_manifest() -> FileResponse:
         path=published_artifact_path("manifest.json"),
         media_type="application/json",
         headers={
-            "Cache-Control": "public, max-age=300",
+            "Cache-Control": "no-cache",
             "X-Content-Type-Options": "nosniff",
         },
     )
@@ -511,7 +570,7 @@ def published_manifest_signature() -> FileResponse:
         path=published_artifact_path("manifest.json.sig"),
         media_type="text/plain",
         headers={
-            "Cache-Control": "public, max-age=300",
+            "Cache-Control": "no-cache",
             "X-Content-Type-Options": "nosniff",
         },
     )
@@ -525,14 +584,15 @@ def published_manifest_signature() -> FileResponse:
 def download_release_file(
     relative_path: str,
 ) -> FileResponse:
-    if relative_path not in app.state.release_files:
+    snapshot = current_package_snapshot()
+    if relative_path not in snapshot.files:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Release file is unavailable",
         )
 
     try:
-        path = safe_release_path(relative_path)
+        path = safe_release_path(relative_path, snapshot.root)
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -570,7 +630,7 @@ def list_mods(
             downloadUrl=f"/api/v1/mods/{mod['id']}/download",
         )
         for mod in sorted(
-            app.state.mods.values(),
+            current_package_snapshot().mods.values(),
             key=lambda item: (item["name"].casefold(), item["filename"].casefold()),
         )
     ]

@@ -9,7 +9,9 @@ must carry the same value. To prepare a backend release, update
 run the full validation commands below. This backend version is independent of
 `MARS_PACK_VERSION` and does not change package manifest version semantics.
 
-The existing `/api/v1` package service remains unchanged. Batch 1 adds
+The existing `/api/v1` download/authentication contracts remain available. Signed
+pack publishing adds a separate server-to-server deployment API; community and
+desktop credentials cannot publish packs. Batch 1 adds
 SQLite-backed GitHub login, explicit desktop authorization, and metadata-only
 community profiles under `/api/auth` and `/api/community`.
 
@@ -45,7 +47,7 @@ or community signing key in frontend configuration.
 ## Configuration and deployment requirements
 
 See `.env.example`. Setting `MARS_AUTH_JWT_SECRET` enables community storage;
-without it every new endpoint returns 503 `auth_not_configured`, without
+without it community/account endpoints return 503 `auth_not_configured`, without
 affecting the package API. When enabled, missing/invalid origins, database path,
 or a short/reused signing secret cause startup failure. OAuth start fails with
 503 `github_not_configured` until both GitHub credentials exist.
@@ -286,6 +288,119 @@ keeps its negative-only gates; no capsule download/install/publication endpoint
 or profile-publication bypass is added. Provider usage rights, provenance/license
 policy and real scanner integration remain deferred.
 
+## HTTPS signed-pack publishing
+
+GitHub Actions can publish approved Minecraft pack files through the existing
+HTTPS API. No SSH, Cloudflare SSH proxy, `scp`, `systemctl`, archive extraction,
+remote commands, or backend-code upload is involved in normal pack updates.
+This is separate from user capsule submission: it installs maintainer-signed
+base packs and does not grant community submissions publication rights.
+
+### One-time server bootstrap
+
+The old running API cannot install this feature itself. Using the server's
+local console or existing administration method:
+
+1. Install this backend update and run `pip install -r requirements.txt` in
+   the API's virtual environment. `cryptography` provides Ed25519 verification.
+2. Set **`MARS_RELEASE_DEPLOY_TOKEN`** to a new random URL-safe value of
+   32..128 characters. Set the same value as a protected **GitHub Actions
+   secret** in the launcher repository. Do not reuse package JWT, community JWT,
+   Minecraft integration, GitHub OAuth, or Cloudflare service credentials.
+3. Set **`MARS_RELEASE_PUBLIC_KEY`** to the public pack-signing key trusted by
+   the launcher. The current public pin is
+   `a88e7dc70a1227cbc3decac967664e3bea75da9d72550e14f2c6a4ea8118391e`.
+   The private signing key stays in maintainer/CI storage, never on the API.
+4. Choose a persistent absolute **`MARS_RELEASE_PUBLISH_DIR`**, for example
+   `/opt/mars-package-api/pack-publisher`, writable by the API service account.
+   It must be separate from `MARS_RELEASE_DIR` and must not be served by a static
+   web server. Without an override, the default is a sibling hidden directory.
+5. Restart the API **once** to load the new code/environment. Keep the existing
+   `MARS_RELEASE_DIR` intact as the legacy/bootstrap release.
+      Its optional server-owned `mods.json` continues to provide API ID/name/version
+      overrides for matching JAR filenames; clients cannot upload or replace it.
+
+Without a deployment token, write endpoints return 503 `publishing_disabled`.
+Read access to an already-active generation persists if you subsequently
+disable publishing; keep its public key and publishing directory configured.
+Production uses HTTPS through the current Cloudflare HTTP tunnel. Restrict
+the publishing path further with Cloudflare Access **Service Auth** if desired;
+the publishing script supports optional service credentials, but the backend
+deployment token is still mandatory.
+
+### Deployment contract
+
+All these routes require `Authorization: Bearer <MARS_RELEASE_DEPLOY_TOKEN>`.
+Authentication happens **before reading the request body**; browser-marked
+requests/cookies, package-reader JWTs, and account credentials are not accepted.
+
+| Method/path | Request | Result |
+| --- | --- | --- |
+| POST `/api/v1/releases/deployments` | `{manifestBase64, signature}` | Reserve the exact signed bytes and return declared upload/reuse progress |
+| GET `/api/v1/releases/deployments/{id}` | deployment credential | Read resumable staging progress and active/published status |
+| PUT `/api/v1/releases/deployments/{id}/files/{index}?offset=N` | raw `application/octet-stream` chunk | Acknowledged byte count and SHA-256-verified completion |
+| POST `/api/v1/releases/deployments/{id}/commit` | `{}` | Verify every file, build serving indexes, and activate the complete release |
+
+`id` is the SHA-256 of the exact manifest bytes. The signature is the existing
+detached 128-character Ed25519 hex signature. The server verifies it **before
+parsing**, then checks the schema, configured Minecraft/loader versions,
+managed directories, unique/safe paths, hashes, and size limits. Only
+hash-listed `files` manifests are accepted; unresolved `curseforgeMods` are not
+deployable inventories. Neither request accepts an arbitrary filesystem path
+or shell command. File indexes refer only to the signed declaration.
+The manifest bytes are never rewritten. Signature text is stored as canonical
+lowercase hex; whitespace/case in a local hex signature file is not signed data.
+
+Uploads are limited to **8 MiB per request**, so larger JARs/resource packs can
+cross the HTTP tunnel without one giant request. Default limits are **512 MiB
+per file**, **4 GiB per pack**, **three staged deployments**, and **one active
+hour to finish staging**. The manifest limit is 8 MiB, with at most 20,000
+declared files. Limits are configurable in `.env.example`.
+Exact chunk retries are idempotent, partial transfers resume from the
+acknowledged offset, and final mismatched hashes are rejected/reset explicitly.
+
+The publish step reuses existing files only when their signed size/hash match,
+and copies them into a new immutable generation. Missing or changed files must
+be uploaded; they cannot be skipped because a manifest says they exist.
+Unlisted files are never added to the new serving inventory.
+
+All generation bytes and serving indexes are verified before a serialized
+SQLite transaction switches the active-generation pointer. Concurrent stale
+deployments cannot overwrite a newer activation. Published pack versions must
+increase after the first API-managed activation; republishing the exact active
+manifest is idempotent, not a mutation or rollback.
+
+The public manifest/signature endpoints, payload route, authenticated mod list,
+mod downloads, and manifest preview read the same active snapshot. API workers
+detect the persistent pointer and refresh their local indexes automatically:
+**no restart is needed for pack publication**. In-flight requests retain paths
+to previous immutable generations. Separate client requests can still straddle
+an activation; clients continue to fail closed/retry if a manifest and signature
+do not match. Manifest responses now require cache revalidation; proxies must
+not override these cache headers with stale fixed-TTL rules.
+
+### Storage, durability and operations
+
+Publishing uses single-host local SQLite/WAL with full synchronous durability
+and immutable generation directories. Use persistent local disk, not shared/NFS
+storage. Restrict filesystem permissions; encrypt backups as appropriate.
+Back up the publishing database/WAL and generation files **together**, plus
+the unchanged legacy release. The API stores no deployment token in that DB.
+
+Expired staging data is cleaned on the next reservation. Previously published
+generations are retained rather than deleted under readers. Monitor disk usage;
+garbage collection and explicit rollback/accounting retention are not automatic
+in this milestone. Do not manually edit active or retained generation files.
+Corrupt/unavailable active storage fails explicitly rather than serving a stale
+or unsigned fallback.
+
+After bootstrap, run the launcher's updated **Publish pack manifest** workflow.
+For the existing pack 1.2.5, use `source_release=v1.2.5` and
+`payload_asset=mars-command-mod-0.4.0.jar`. Its already-signed manifest is
+preserved; the declared JAR is uploaded only if not reusable on the server.
+The workflow verifies the exact live manifest bytes and matching hex signature after
+publication. Installing the endpoint is not itself a deployment of pack 1.2.5.
+
 ## Minecraft player arrival
 
 Minecraft arrival reuses the same GitHub OAuth start/callback and website
@@ -341,7 +456,7 @@ milestone.
 
 ```powershell
 Set-Location 'D:\Documents\Personal-Projects\Mars-Command\mars-command-backend'
-& '.\.venv\Scripts\python.exe' -m pytest tests\test_capsules.py tests\test_community.py tests\test_ingestion.py tests\test_minecraft.py -q -p no:cacheprovider
+& '.\.venv\Scripts\python.exe' -m pytest tests\test_capsules.py tests\test_community.py tests\test_ingestion.py tests\test_minecraft.py tests\test_release_publishing.py -q -p no:cacheprovider
 & '.\.venv\Scripts\python.exe' -m compileall -q server tests
 git diff --check
 ```
