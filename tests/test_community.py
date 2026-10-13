@@ -36,6 +36,7 @@ def environment(monkeypatch):
         website_url=ORIGIN, backend_url=BACKEND, jwt_secret="test-community-secret-" + "a" * 40,
         database=str(folder / "community.sqlite3"),
         github_client_id="test-id", github_client_secret="test-provider-secret",
+        minecraft_server_token="test-minecraft-token-" + "m" * 40,
     )
     # Keep the advanced device-poll clock behind JWT's real iat verification clock.
     clock = [int(time.time()) - 10]

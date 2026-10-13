@@ -1,10 +1,10 @@
 """Durable metadata-only community API; separate from package download credentials."""
 
-import hashlib
 import ipaddress
 import json
 import logging
 import os
+import re
 import secrets
 import sqlite3
 import time
@@ -16,7 +16,7 @@ from urllib.parse import urlencode, urlsplit
 
 import httpx
 import jwt
-from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Path as PathParameter, Query, Request, Response
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -24,12 +24,22 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 if __package__:
+    from .auth_helpers import digest, fail
+    from .minecraft import (
+        ArrivalInput, ArrivalResponse, ChallengeInput, ChallengeResponse, ConfirmInput,
+        MinecraftWorkflow, PlayerContext, RequestDetails, UUID_PATTERN, initialize_minecraft,
+    )
     from .capsules import initialize_capsules
     from .ingestion import (
         CapsuleBlocked, CapsuleResponse, CapsulesResponse, CapsuleWorkflow,
         IngestionSettings, initialize_ingestion,
     )
 else:
+    from auth_helpers import digest, fail
+    from minecraft import (
+        ArrivalInput, ArrivalResponse, ChallengeInput, ChallengeResponse, ConfirmInput,
+        MinecraftWorkflow, PlayerContext, RequestDetails, UUID_PATTERN, initialize_minecraft,
+    )
     from capsules import initialize_capsules
     from ingestion import (
         CapsuleBlocked, CapsuleResponse, CapsulesResponse, CapsuleWorkflow,
@@ -47,14 +57,6 @@ TOKEN_TTL = 900
 POLL_INTERVAL = 5
 MAX_BODY = 128 * 1024
 logger = logging.getLogger("mars-community-api")
-
-
-def fail(status: int, code: str, message: str) -> HTTPException:
-    return HTTPException(status, detail={"code": code, "message": message})
-
-
-def digest(value: str) -> str:
-    return hashlib.sha256(value.encode()).hexdigest()
 
 
 def origin(value: str, allow_local: bool = False) -> str:
@@ -98,6 +100,7 @@ class Settings:
     github_client_secret: str = ""
     allow_local_http: bool = False
     capsules: IngestionSettings | None = None
+    minecraft_server_token: str = ""
 
     @property
     def enabled(self) -> bool:
@@ -116,6 +119,11 @@ class Settings:
             return
         if len(self.jwt_secret) < 32:
             raise ValueError("MARS_AUTH_JWT_SECRET must contain at least 32 characters")
+        if self.minecraft_server_token and (
+            not re.fullmatch(r"[A-Za-z0-9_-]{32,128}", self.minecraft_server_token)
+            or self.minecraft_server_token == self.jwt_secret
+        ):
+            raise ValueError("MARS_MINECRAFT_SERVER_TOKEN must be separate and contain at least 32 characters")
         if not self.database:
             raise ValueError("MARS_COMMUNITY_DB must be set")
         if self.capsules is None:
@@ -143,6 +151,9 @@ class Settings:
         secret = os.environ.get("MARS_AUTH_JWT_SECRET", "")
         if secret and secret == os.environ.get("MARS_API_JWT_SECRET"):
             raise ValueError("Community and package JWT secrets must be different")
+        minecraft_token = os.environ.get("MARS_MINECRAFT_SERVER_TOKEN", "")
+        if minecraft_token and minecraft_token == os.environ.get("MARS_API_JWT_SECRET"):
+            raise ValueError("Minecraft and package secrets must be different")
         database = os.environ.get("MARS_COMMUNITY_DB", "")
         if database and not Path(database).is_absolute():
             database = str(Path(__file__).resolve().parent.parent / database)
@@ -156,6 +167,7 @@ class Settings:
             allow_local_http=os.environ.get("MARS_AUTH_ALLOW_LOCAL_HTTP", "").lower()
             == "true",
             capsules=IngestionSettings.for_database(database, environment=True) if secret else None,
+            minecraft_server_token=minecraft_token,
         )
 
 
@@ -203,6 +215,7 @@ class Store:
             """)
             initialize_capsules(db)
             initialize_ingestion(db)
+            initialize_minecraft(db)
         finally:
             db.close()
         if os.name != "nt":
@@ -651,6 +664,22 @@ def install_community(app: FastAPI, settings: Settings | None = None) -> None:
             raise fail(401, "authentication_required", "Website login is required")
         return user
 
+    def minecraft_server(request: Request):
+        ready()
+        configured = settings.minecraft_server_token
+        if not configured:
+            raise fail(503, "minecraft_not_configured", "Minecraft arrival integration is not configured")
+        authorization = request.headers.get("authorization", "")
+        if len(authorization) > 512 or not authorization.isascii() or not authorization.startswith("Bearer ") or not secrets.compare_digest(
+            authorization[7:], configured
+        ):
+            raise fail(401, "invalid_server_token", "A valid Minecraft server credential is required")
+        if request.headers.get("origin") or request.headers.get("sec-fetch-mode"):
+            raise fail(403, "server_only", "This endpoint accepts server-to-server requests only")
+
+    def minecraft_workflow() -> MinecraftWorkflow:
+        return MinecraftWorkflow(ready(), settings.website_url)
+
     def identity(request: Request) -> dict:
         ready()
         authorization = request.headers.get("authorization")
@@ -949,6 +978,51 @@ def install_community(app: FastAPI, settings: Settings | None = None) -> None:
             "pollInterval": POLL_INTERVAL,
         }
 
+    @router.get("/api/auth/requests/{request_id}", response_model=RequestDetails)
+    def authorization_request(request_id: Annotated[str, PathParameter(pattern=r"^[a-f0-9]{32}$")], request: Request):
+        limit(request, "request-details", 60)
+        if request.headers.get("origin"):
+            csrf(request)
+        if session_user(request) is None:
+            raise fail(401, "authentication_required", "Website login is required")
+        with ready().connect() as db:
+            row = db.execute(
+                "SELECT devices.status, devices.expires, minecraft_players.callsign, minecraft_players.player_name "
+                "FROM devices LEFT JOIN minecraft_requests USING(request_id) "
+                "LEFT JOIN minecraft_players USING(minecraft_uuid) WHERE request_id=?", (request_id,),
+            ).fetchone()
+            if not row or row["expires"] <= int(time.time()) or row["status"] not in {"pending", "approved"}:
+                raise fail(409, "invalid_request", "Authorization request is unavailable, used or expired")
+            return {"kind": "minecraft" if row["callsign"] is not None else "desktop",
+                    "status": row["status"], "callSign": row["callsign"], "playerName": row["player_name"]}
+
+    @router.post("/api/auth/minecraft/arrival", response_model=ArrivalResponse, response_model_exclude_none=True)
+    def minecraft_arrival(body: ArrivalInput, request: Request, _: Annotated[None, Depends(minecraft_server)]):
+        limit(request, "minecraft-arrival", 100)
+        return minecraft_workflow().start(body.minecraftUuid, body.playerName, int(time.time()))
+
+    @router.post("/api/auth/minecraft/poll", response_model=ChallengeResponse, response_model_exclude_none=True)
+    def minecraft_poll(body: ChallengeInput, request: Request, _: Annotated[None, Depends(minecraft_server)]):
+        limit(request, "minecraft-poll", 1200)
+        return minecraft_workflow().poll(body.minecraftUuid, body.deviceCode, int(time.time()))
+
+    @router.post("/api/auth/minecraft/approve", response_model=ApprovalResponse)
+    def minecraft_approve(body: Approve, request: Request, user: Annotated[dict, Depends(cookie_identity)]):
+        limit(request, "minecraft-approve", 30)
+        minecraft_workflow().approve(body.requestId, user["id"], int(time.time()))
+        return {"status": "approved"}
+
+    @router.post("/api/auth/minecraft/confirm", response_model=PlayerContext)
+    def minecraft_confirm(body: ConfirmInput, request: Request, _: Annotated[None, Depends(minecraft_server)]):
+        limit(request, "minecraft-confirm", 100)
+        return minecraft_workflow().confirm(body.minecraftUuid, body.deviceCode, body.expectedAccountName, int(time.time()))
+
+    @router.get("/api/auth/minecraft/context/{minecraft_uuid}", response_model=PlayerContext)
+    def minecraft_context(minecraft_uuid: Annotated[str, PathParameter(pattern=UUID_PATTERN)],
+                          request: Request, _: Annotated[None, Depends(minecraft_server)]):
+        limit(request, "minecraft-context", 1200)
+        return minecraft_workflow().context(minecraft_uuid)
+
     @router.post(
         "/api/auth/desktop/poll",
         response_model=PollResponse,
@@ -958,6 +1032,9 @@ def install_community(app: FastAPI, settings: Settings | None = None) -> None:
         limit(request, "desktop-poll", 120)
         now = int(time.time())
         with ready().connect() as db:
+            if db.execute("SELECT 1 FROM minecraft_requests JOIN devices USING(request_id) WHERE secret_hash=?",
+                          (digest(body.deviceCode),)).fetchone():
+                raise fail(403, "wrong_request_kind", "Minecraft arrivals cannot issue desktop credentials")
             row = db.execute(
                 "SELECT * FROM devices WHERE secret_hash=?", (digest(body.deviceCode),)
             ).fetchone()
@@ -1003,6 +1080,8 @@ def install_community(app: FastAPI, settings: Settings | None = None) -> None:
     ):
         limit(request, "desktop-approve", 30)
         with ready().connect() as db:
+            if db.execute("SELECT 1 FROM minecraft_requests WHERE request_id=?", (body.requestId,)).fetchone():
+                raise fail(403, "wrong_request_kind", "Use explicit Minecraft arrival approval")
             row = db.execute(
                 "SELECT * FROM devices WHERE request_id=?", (body.requestId,)
             ).fetchone()
