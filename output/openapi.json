@@ -2218,6 +2218,134 @@
         }
       }
     },
+    "/api/auth/minecraft/plan": {
+      "post": {
+        "summary": "Minecraft Plan",
+        "operationId": "minecraft_plan_api_auth_minecraft_plan_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlanRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "Request Timeout",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Content Too Large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported Media Type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Content",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/auth/desktop/poll": {
       "post": {
         "summary": "Poll",
@@ -4269,6 +4397,103 @@
         ],
         "title": "ModListResponse"
       },
+      "Need": {
+        "properties": {
+          "template": {
+            "type": "string",
+            "pattern": "^[a-z0-9_]{1,64}$",
+            "title": "Template"
+          },
+          "item": {
+            "type": "string",
+            "maxLength": 200,
+            "pattern": "^[a-z0-9_.-]+:[a-z0-9/._-]+$",
+            "title": "Item"
+          },
+          "remaining": {
+            "type": "integer",
+            "maximum": 1000000.0,
+            "minimum": 1.0,
+            "title": "Remaining"
+          },
+          "chunk": {
+            "type": "integer",
+            "maximum": 4096.0,
+            "minimum": 1.0,
+            "title": "Chunk"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "template",
+          "item",
+          "remaining",
+          "chunk"
+        ],
+        "title": "Need"
+      },
+      "PlanRequest": {
+        "properties": {
+          "phase": {
+            "type": "string",
+            "pattern": "^[a-z0-9_]{1,64}$",
+            "title": "Phase"
+          },
+          "needs": {
+            "items": {
+              "$ref": "#/components/schemas/Need"
+            },
+            "type": "array",
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Needs"
+          },
+          "recent": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 16,
+            "title": "Recent"
+          },
+          "readyPlayers": {
+            "type": "integer",
+            "maximum": 1000.0,
+            "minimum": 0.0,
+            "title": "Readyplayers",
+            "default": 0
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "phase",
+          "needs"
+        ],
+        "title": "PlanRequest"
+      },
+      "PlanResponse": {
+        "properties": {
+          "proposal": {
+            "$ref": "#/components/schemas/Proposal"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "model",
+              "heuristic"
+            ],
+            "title": "Source"
+          }
+        },
+        "type": "object",
+        "required": [
+          "proposal",
+          "source"
+        ],
+        "title": "PlanResponse"
+      },
       "PlayerContext": {
         "properties": {
           "minecraftUuid": {
@@ -4585,6 +4810,35 @@
           "profiles"
         ],
         "title": "ProfilesResponse"
+      },
+      "Proposal": {
+        "properties": {
+          "template": {
+            "type": "string",
+            "title": "Template"
+          },
+          "quantity": {
+            "type": "integer",
+            "title": "Quantity"
+          },
+          "briefing": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Briefing"
+          }
+        },
+        "type": "object",
+        "required": [
+          "template",
+          "quantity"
+        ],
+        "title": "Proposal"
       },
       "Published": {
         "properties": {

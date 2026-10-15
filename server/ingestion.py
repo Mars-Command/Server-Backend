@@ -11,14 +11,15 @@ import shutil
 import sqlite3
 import stat
 import subprocess
-from functools import cache
 import time
 import zipfile
 import zlib
+from collections.abc import AsyncIterable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from functools import cache
 from pathlib import Path, PurePosixPath
-from typing import AsyncIterable, Literal, Protocol
+from typing import Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -31,10 +32,24 @@ ROOT = Path(__file__).resolve().parent.parent
 POLICY_VERSION = "capsule-v1"
 logger = logging.getLogger("mars-capsules")
 State = Literal[
-    "reserved", "uploading", "quarantined", "scan_pending", "scan_blocked",
-    "rejected", "publishable", "expired", "withdrawn",
+    "reserved",
+    "uploading",
+    "quarantined",
+    "scan_pending",
+    "scan_blocked",
+    "rejected",
+    "publishable",
+    "expired",
+    "withdrawn",
 ]
-ACTIVE = ("reserved", "uploading", "quarantined", "scan_pending", "scan_blocked", "publishable")
+ACTIVE = (
+    "reserved",
+    "uploading",
+    "quarantined",
+    "scan_pending",
+    "scan_blocked",
+    "publishable",
+)
 TRANSITIONS = {
     "reserved": {"uploading", "expired", "withdrawn"},
     "uploading": {"reserved", "quarantined", "expired", "withdrawn"},
@@ -49,7 +64,9 @@ TRANSITIONS = {
 
 
 def timestamp(value: float | None = None) -> str:
-    return datetime.fromtimestamp(time.time() if value is None else value, timezone.utc).isoformat()
+    return datetime.fromtimestamp(
+        time.time() if value is None else value, UTC
+    ).isoformat()
 
 
 @dataclass(frozen=True)
@@ -70,17 +87,28 @@ class IngestionSettings:
 
     def __post_init__(self):
         for name in (
-            "max_bytes", "max_active", "expiry_seconds", "lease_seconds",
-            "max_attempts", "retry_seconds", "evidence_seconds", "upload_seconds",
+            "max_bytes",
+            "max_active",
+            "expiry_seconds",
+            "lease_seconds",
+            "max_attempts",
+            "retry_seconds",
+            "evidence_seconds",
+            "upload_seconds",
         ):
-            if type(getattr(self, name)) is not int or not 0 < getattr(self, name) <= 2**31:
+            if (
+                type(getattr(self, name)) is not int
+                or not 0 < getattr(self, name) <= 2**31
+            ):
                 raise ValueError(f"Invalid capsule {name}")
         if self.scanner != "disabled":
             raise ValueError("No permitted production scanner adapter is installed")
         if not re.fullmatch(r"[A-Za-z0-9._:-]{1,80}", self.policy_version):
             raise ValueError("Invalid capsule policy version")
         roots = []
-        public = [ROOT / name for name in ("static", "public", "output", "releases", "dist")]
+        public = [
+            ROOT / name for name in ("static", "public", "output", "releases", "dist")
+        ]
         if os.environ.get("MARS_RELEASE_DIR"):
             public.append(Path(os.environ["MARS_RELEASE_DIR"]).resolve())
         for name in ("quarantine", "retained", "evidence"):
@@ -89,7 +117,9 @@ class IngestionSettings:
                 raise ValueError("Private bucket paths must be absolute")
             # Reject links/junctions in any existing ancestor, not merely the leaf.
             if any(p.is_symlink() or p.is_junction() for p in (path, *path.parents)):
-                raise ValueError("Private bucket paths cannot contain links or junctions")
+                raise ValueError(
+                    "Private bucket paths cannot contain links or junctions"
+                )
             path = path.resolve()
             if any(path == p or path in p.parents or p in path.parents for p in public):
                 raise ValueError("Private buckets overlap a public/package directory")
@@ -103,18 +133,30 @@ class IngestionSettings:
         base = Path(database).resolve().parent / "capsule-private"
         values = {}
         for name in ("quarantine", "retained", "evidence"):
-            value = os.environ.get(f"MARS_CAPSULE_{name.upper()}") if environment else None
+            value = (
+                os.environ.get(f"MARS_CAPSULE_{name.upper()}") if environment else None
+            )
             values[name] = Path(value) if value else base / name
         for name in (
-            "max_bytes", "max_active", "expiry_seconds", "lease_seconds",
-            "max_attempts", "retry_seconds", "evidence_seconds", "upload_seconds",
+            "max_bytes",
+            "max_active",
+            "expiry_seconds",
+            "lease_seconds",
+            "max_attempts",
+            "retry_seconds",
+            "evidence_seconds",
+            "upload_seconds",
         ):
-            value = os.environ.get(f"MARS_CAPSULE_{name.upper()}") if environment else None
+            value = (
+                os.environ.get(f"MARS_CAPSULE_{name.upper()}") if environment else None
+            )
             if value is not None:
                 values[name] = int(value)
         if environment:
             values["scanner"] = os.environ.get("MARS_CAPSULE_SCANNER", "disabled")
-            values["policy_version"] = os.environ.get("MARS_CAPSULE_POLICY_VERSION", POLICY_VERSION)
+            values["policy_version"] = os.environ.get(
+                "MARS_CAPSULE_POLICY_VERSION", POLICY_VERSION
+            )
         return cls(**values)
 
 
@@ -279,10 +321,17 @@ class PrivateBucket:
     @staticmethod
     @cache
     def windows_sid() -> str:
-        return subprocess.run(
-            ["whoami", "/user", "/fo", "csv", "/nh"], check=True,
-            capture_output=True, text=True,
-        ).stdout.strip().split(",")[-1].strip('"')
+        return (
+            subprocess.run(
+                ["whoami", "/user", "/fo", "csv", "/nh"],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            .stdout.strip()
+            .split(",")[-1]
+            .strip('"')
+        )
 
     @staticmethod
     def restrict(path: Path, *, directory: bool = False):
@@ -298,31 +347,54 @@ class PrivateBucket:
             advapi = ctypes.WinDLL("advapi32", use_last_error=True)
             kernel = ctypes.WinDLL("kernel32", use_last_error=True)
             advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW.argtypes = [
-                wintypes.LPCWSTR, wintypes.DWORD, ctypes.POINTER(ctypes.c_void_p),
+                wintypes.LPCWSTR,
+                wintypes.DWORD,
+                ctypes.POINTER(ctypes.c_void_p),
                 ctypes.POINTER(wintypes.DWORD),
             ]
-            advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW.restype = wintypes.BOOL
+            advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW.restype = (
+                wintypes.BOOL
+            )
             advapi.GetSecurityDescriptorDacl.argtypes = [
-                ctypes.c_void_p, ctypes.POINTER(wintypes.BOOL),
-                ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(wintypes.BOOL),
+                ctypes.c_void_p,
+                ctypes.POINTER(wintypes.BOOL),
+                ctypes.POINTER(ctypes.c_void_p),
+                ctypes.POINTER(wintypes.BOOL),
             ]
             advapi.GetSecurityDescriptorDacl.restype = wintypes.BOOL
             advapi.SetNamedSecurityInfoW.argtypes = [
-                wintypes.LPWSTR, wintypes.DWORD, wintypes.DWORD,
-                ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+                wintypes.LPWSTR,
+                wintypes.DWORD,
+                wintypes.DWORD,
+                ctypes.c_void_p,
+                ctypes.c_void_p,
+                ctypes.c_void_p,
+                ctypes.c_void_p,
             ]
             advapi.SetNamedSecurityInfoW.restype = wintypes.DWORD
             kernel.LocalFree.argtypes = [ctypes.c_void_p]
             kernel.LocalFree.restype = ctypes.c_void_p
             descriptor = ctypes.c_void_p()
-            if not advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl, 1, ctypes.byref(descriptor), None):
+            if not advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                sddl, 1, ctypes.byref(descriptor), None
+            ):
                 raise OSError("Private bucket ACL creation failed")
             try:
                 present, defaulted = wintypes.BOOL(), wintypes.BOOL()
                 dacl = ctypes.c_void_p()
-                if not advapi.GetSecurityDescriptorDacl(descriptor, ctypes.byref(present), ctypes.byref(dacl), ctypes.byref(defaulted)):
+                if not advapi.GetSecurityDescriptorDacl(
+                    descriptor,
+                    ctypes.byref(present),
+                    ctypes.byref(dacl),
+                    ctypes.byref(defaulted),
+                ):
                     raise OSError("Private bucket ACL reading failed")
-                if advapi.SetNamedSecurityInfoW(str(path), 1, 0x80000004, None, None, dacl, None) != 0:
+                if (
+                    advapi.SetNamedSecurityInfoW(
+                        str(path), 1, 0x80000004, None, None, dacl, None
+                    )
+                    != 0
+                ):
                     raise OSError("Private bucket ACL setup failed")
             finally:
                 kernel.LocalFree(descriptor)
@@ -353,10 +425,16 @@ class PrivateBucket:
                     parts = PurePosixPath(name).parts
                     mode = entry.external_attr >> 16
                     if (
-                        not name or name in names or "\\" in name or ":" in name
-                        or name.startswith("/") or ".." in parts or "\x00" in name
+                        not name
+                        or name in names
+                        or "\\" in name
+                        or ":" in name
+                        or name.startswith("/")
+                        or ".." in parts
+                        or "\x00" in name
                         or any(ord(c) < 32 for c in name)
-                        or stat.S_ISLNK(mode) or entry.flag_bits & 1
+                        or stat.S_ISLNK(mode)
+                        or entry.flag_bits & 1
                     ):
                         raise ValueError("Unsafe entry")
                     names.add(name)
@@ -367,15 +445,27 @@ class PrivateBucket:
                         or entry.file_size > max(entry.compress_size, 1) * 100
                     ):
                         raise ValueError("Decompression bound")
-                if not any(n.endswith(".class") or n.upper() == "META-INF/MANIFEST.MF" for n in names):
+                if not any(
+                    n.endswith(".class") or n.upper() == "META-INF/MANIFEST.MF"
+                    for n in names
+                ):
                     raise ValueError("Not a JAR")
                 # CRC-check all data without extraction; declared expansion is bounded above.
                 if archive.testzip() is not None:
                     raise ValueError("CRC mismatch")
-        except (zipfile.BadZipFile, RuntimeError, NotImplementedError, ValueError, EOFError, zlib.error) as exc:
+        except (
+            zipfile.BadZipFile,
+            RuntimeError,
+            NotImplementedError,
+            ValueError,
+            EOFError,
+            zlib.error,
+        ) as exc:
             raise CapsuleBlocked("artifact_invalid") from exc
 
-    async def stream(self, chunks: AsyncIterable[bytes], token: str) -> tuple[Path, str, int]:
+    async def stream(
+        self, chunks: AsyncIterable[bytes], token: str
+    ) -> tuple[Path, str, int]:
         path = self.settings.quarantine / f"upload-{token}.part"
         checksum = hashlib.sha256()
         size = 0
@@ -440,6 +530,7 @@ class ScanResult:
 
 class Scanner(Protocol):
     provider: str
+
     def scan(self, digest: str, path: Path) -> ScanResult: ...
 
 
@@ -452,7 +543,10 @@ class DisabledScanner:
 
 class CapsuleWorkflow:
     def __init__(
-        self, store: CommunityStore, settings: IngestionSettings, *,
+        self,
+        store: CommunityStore,
+        settings: IngestionSettings,
+        *,
         trusted_provider: str | None = None,
     ):
         self.store = store
@@ -467,7 +561,8 @@ class CapsuleWorkflow:
             "o.upload_token,o.upload_expires FROM capsule_releases r "
             "JOIN capsule_operations o USING(release_id) "
             "LEFT JOIN capsule_release_artifacts b USING(release_id) "
-            "WHERE r.release_id=? AND r.uploader_id=?", (release_id, owner),
+            "WHERE r.release_id=? AND r.uploader_id=?",
+            (release_id, owner),
         ).fetchone()
         if row is None:
             raise CapsuleBlocked("release_not_found")
@@ -475,15 +570,21 @@ class CapsuleWorkflow:
 
     @staticmethod
     def transition(db, release_id: str, state: str, now: float):
-        row = db.execute("SELECT state FROM capsule_operations WHERE release_id=?", (release_id,)).fetchone()
+        row = db.execute(
+            "SELECT state FROM capsule_operations WHERE release_id=?", (release_id,)
+        ).fetchone()
         if row["state"] == state:
             return
         if state not in TRANSITIONS[row["state"]]:
-            logger.warning("capsule_unexpected_transition", extra={"state": row["state"], "target": state})
+            logger.warning(
+                "capsule_unexpected_transition",
+                extra={"state": row["state"], "target": state},
+            )
             raise CapsuleBlocked("invalid_state")
         db.execute(
             "UPDATE capsule_operations SET state=?,revision=revision+1,updated_at=?,"
-            "upload_token=NULL,upload_expires=NULL WHERE release_id=?", (state, now, release_id),
+            "upload_token=NULL,upload_expires=NULL WHERE release_id=?",
+            (state, now, release_id),
         )
 
     def response(self, db, row) -> dict:
@@ -496,50 +597,89 @@ class CapsuleWorkflow:
             (row["artifact_sha256"], self.settings.policy_version),
         ).fetchone()
         return {
-            "releaseId": row["release_id"], "ownerId": row["uploader_id"],
-            "project": row["project"], "version": row["version"],
-            "sourceUrl": row["declared_source"], "createdAt": row["created_at"],
-            "artifactSha256": row["artifact_sha256"], "state": row["state"],
-            "revision": row["revision"], "updatedAt": timestamp(row["updated_at"]),
+            "releaseId": row["release_id"],
+            "ownerId": row["uploader_id"],
+            "project": row["project"],
+            "version": row["version"],
+            "sourceUrl": row["declared_source"],
+            "createdAt": row["created_at"],
+            "artifactSha256": row["artifact_sha256"],
+            "state": row["state"],
+            "revision": row["revision"],
+            "updatedAt": timestamp(row["updated_at"]),
             "publicDownloadAvailable": False,
-            "evidence": {
-                "version": evidence["version"], "artifactSha256": evidence["digest"],
-                "provider": evidence["provider"], "providerResultId": evidence["provider_result_id"],
-                "policyVersion": evidence["policy_version"], "scannedAt": timestamp(evidence["scanned_at"]),
-                "expiresAt": timestamp(evidence["expires_at"]), "verdict": evidence["verdict"],
-                "summary": evidence["summary"],
-            } if evidence else None,
-            "queue": {
-                "status": job["status"], "attempts": job["attempts"], "maxAttempts": job["max_attempts"],
-                "nextAttemptAt": timestamp(job["next_attempt"]) if job["status"] == "pending" else None,
-                "lastError": job["last_error"],
-            } if job else None,
+            "evidence": (
+                {
+                    "version": evidence["version"],
+                    "artifactSha256": evidence["digest"],
+                    "provider": evidence["provider"],
+                    "providerResultId": evidence["provider_result_id"],
+                    "policyVersion": evidence["policy_version"],
+                    "scannedAt": timestamp(evidence["scanned_at"]),
+                    "expiresAt": timestamp(evidence["expires_at"]),
+                    "verdict": evidence["verdict"],
+                    "summary": evidence["summary"],
+                }
+                if evidence
+                else None
+            ),
+            "queue": (
+                {
+                    "status": job["status"],
+                    "attempts": job["attempts"],
+                    "maxAttempts": job["max_attempts"],
+                    "nextAttemptAt": (
+                        timestamp(job["next_attempt"])
+                        if job["status"] == "pending"
+                        else None
+                    ),
+                    "lastError": job["last_error"],
+                }
+                if job
+                else None
+            ),
         }
 
-    def reserve(self, owner: str, project: str, version: str, source: str, key: str) -> dict:
+    def reserve(
+        self, owner: str, project: str, version: str, source: str, key: str
+    ) -> dict:
         if not re.fullmatch(r"[A-Za-z0-9._:-]{1,128}", key):
             raise CapsuleBlocked("invalid_input")
         now = time.time()
         with self.store.connect() as db:
             existing = db.execute(
-                "SELECT release_id FROM capsule_idempotency WHERE owner_id=? AND key=?", (owner, key),
+                "SELECT release_id FROM capsule_idempotency WHERE owner_id=? AND key=?",
+                (owner, key),
             ).fetchone()
             if existing:
                 row = self.owned(db, existing["release_id"], owner)
-                if (row["project"], row["version"], row["declared_source"]) != (project, version, source):
+                if (row["project"], row["version"], row["declared_source"]) != (
+                    project,
+                    version,
+                    source,
+                ):
                     raise CapsuleBlocked("idempotency_conflict")
                 return self.response(db, row)
             count = db.execute(
                 "SELECT count(*) FROM capsule_releases r JOIN capsule_operations o USING(release_id) "
-                f"WHERE uploader_id=? AND state IN ({','.join('?' for _ in ACTIVE)})", (owner, *ACTIVE),
+                f"WHERE uploader_id=? AND state IN ({','.join('?' for _ in ACTIVE)})",
+                (owner, *ACTIVE),
             ).fetchone()[0]
             if count >= self.settings.max_active:
                 raise CapsuleBlocked("submission_limit")
             release_id = secrets.token_hex(16)
-            db.execute("INSERT INTO capsule_releases VALUES (?,?,?,?,?,?)",
-                       (release_id, owner, project, version, source, timestamp(now)))
-            db.execute("INSERT INTO capsule_operations VALUES (?,'reserved',1,?,NULL,NULL)", (release_id, now))
-            db.execute("INSERT INTO capsule_idempotency VALUES (?,?,?)", (owner, key, release_id))
+            db.execute(
+                "INSERT INTO capsule_releases VALUES (?,?,?,?,?,?)",
+                (release_id, owner, project, version, source, timestamp(now)),
+            )
+            db.execute(
+                "INSERT INTO capsule_operations VALUES (?,'reserved',1,?,NULL,NULL)",
+                (release_id, now),
+            )
+            db.execute(
+                "INSERT INTO capsule_idempotency VALUES (?,?,?)",
+                (owner, key, release_id),
+            )
             return self.response(db, self.owned(db, release_id, owner))
 
     def get(self, release_id: str, owner: str) -> dict:
@@ -552,13 +692,18 @@ class CapsuleWorkflow:
 
     def mine(self, owner: str) -> dict:
         with self.store.connect() as db:
-            ids = [row[0] for row in db.execute(
-                "SELECT release_id FROM capsule_releases WHERE uploader_id=? ORDER BY created_at DESC LIMIT 100",
-                (owner,),
-            )]
+            ids = [
+                row[0]
+                for row in db.execute(
+                    "SELECT release_id FROM capsule_releases WHERE uploader_id=? ORDER BY created_at DESC LIMIT 100",
+                    (owner,),
+                )
+            ]
         return {"capsules": [self.get(release_id, owner) for release_id in ids]}
 
-    async def upload(self, release_id: str, owner: str, chunks: AsyncIterable[bytes]) -> dict:
+    async def upload(
+        self, release_id: str, owner: str, chunks: AsyncIterable[bytes]
+    ) -> dict:
         token = secrets.token_hex(16)
         bound = None
         now = time.time()
@@ -590,7 +735,11 @@ class CapsuleWorkflow:
                     if digest != bound:
                         raise CapsuleBlocked("release_already_bound")
                 else:
-                    if row["state"] != "uploading" or row["upload_token"] != token or row["upload_expires"] <= time.time():
+                    if (
+                        row["state"] != "uploading"
+                        or row["upload_token"] != token
+                        or row["upload_expires"] <= time.time()
+                    ):
                         raise CapsuleBlocked("invalid_state")
                     destination = self.bucket.artifact(digest)
                     if destination.exists():
@@ -598,27 +747,50 @@ class CapsuleWorkflow:
                             raise CapsuleBlocked("storage_unavailable")
                     else:
                         os.replace(path, destination)
-                    artifact = db.execute("SELECT size FROM capsule_artifacts WHERE sha256=?", (digest,)).fetchone()
+                    artifact = db.execute(
+                        "SELECT size FROM capsule_artifacts WHERE sha256=?", (digest,)
+                    ).fetchone()
                     if artifact is None:
-                        db.execute("INSERT INTO capsule_artifacts(sha256,size) VALUES (?,?)", (digest, size))
+                        db.execute(
+                            "INSERT INTO capsule_artifacts(sha256,size) VALUES (?,?)",
+                            (digest, size),
+                        )
                     elif artifact["size"] != size:
                         raise CapsuleBlocked("artifact_identity_conflict")
-                    db.execute("INSERT INTO capsule_release_artifacts VALUES (?,?)", (release_id, digest))
+                    db.execute(
+                        "INSERT INTO capsule_release_artifacts VALUES (?,?)",
+                        (release_id, digest),
+                    )
                     self.transition(db, release_id, "quarantined", time.time())
                     db.execute(
                         "INSERT OR IGNORE INTO capsule_jobs(digest,policy_version,status,max_attempts,next_attempt) "
                         "VALUES (?,?,'pending',?,?)",
-                        (digest, self.settings.policy_version, self.settings.max_attempts, time.time()),
+                        (
+                            digest,
+                            self.settings.policy_version,
+                            self.settings.max_attempts,
+                            time.time(),
+                        ),
                     )
                     self.transition(db, release_id, "scan_pending", time.time())
-                    job = db.execute("SELECT status FROM capsule_jobs WHERE digest=? AND policy_version=?",
-                                     (digest, self.settings.policy_version)).fetchone()
-                    if job["status"] == "complete" and self.publishable(db, self.owned(db, release_id, owner)):
+                    job = db.execute(
+                        "SELECT status FROM capsule_jobs WHERE digest=? AND policy_version=?",
+                        (digest, self.settings.policy_version),
+                    ).fetchone()
+                    if job["status"] == "complete" and self.publishable(
+                        db, self.owned(db, release_id, owner)
+                    ):
                         self.transition(db, release_id, "publishable", time.time())
                     elif job["status"] in {"blocked", "failed", "complete"}:
-                        evidence = db.execute("SELECT verdict FROM capsule_evidence WHERE digest=? ORDER BY version DESC LIMIT 1",
-                                              (digest,)).fetchone()
-                        target = "rejected" if evidence and evidence["verdict"] == "rejected" else "scan_blocked"
+                        evidence = db.execute(
+                            "SELECT verdict FROM capsule_evidence WHERE digest=? ORDER BY version DESC LIMIT 1",
+                            (digest,),
+                        ).fetchone()
+                        target = (
+                            "rejected"
+                            if evidence and evidence["verdict"] == "rejected"
+                            else "scan_blocked"
+                        )
                         self.transition(db, release_id, target, time.time())
             return self.get(release_id, owner)
         finally:
@@ -633,17 +805,28 @@ class CapsuleWorkflow:
     def retry(self, release_id: str, owner: str) -> dict:
         with self.store.connect() as db:
             row = self.owned(db, release_id, owner)
-            job = db.execute("SELECT * FROM capsule_jobs WHERE digest=? AND policy_version=?",
-                             (row["artifact_sha256"], self.settings.policy_version)).fetchone()
-            if row["state"] == "scan_pending" and job and job["status"] in {"pending", "leased"}:
+            job = db.execute(
+                "SELECT * FROM capsule_jobs WHERE digest=? AND policy_version=?",
+                (row["artifact_sha256"], self.settings.policy_version),
+            ).fetchone()
+            if (
+                row["state"] == "scan_pending"
+                and job
+                and job["status"] in {"pending", "leased"}
+            ):
                 return self.response(db, row)
             if row["state"] != "scan_blocked" or not job or job["status"] == "leased":
                 raise CapsuleBlocked("retry_not_eligible")
             if job["attempts"] >= job["max_attempts"]:
                 raise CapsuleBlocked("retry_not_eligible")
-            if not self.bucket.verify(self.bucket.artifact(row["artifact_sha256"]), row["artifact_sha256"]):
+            if not self.bucket.verify(
+                self.bucket.artifact(row["artifact_sha256"]), row["artifact_sha256"]
+            ):
                 raise CapsuleBlocked("artifact_unavailable")
-            db.execute("UPDATE capsule_jobs SET status='pending',next_attempt=? WHERE id=?", (time.time(), job["id"]))
+            db.execute(
+                "UPDATE capsule_jobs SET status='pending',next_attempt=? WHERE id=?",
+                (time.time(), job["id"]),
+            )
             self.transition(db, release_id, "scan_pending", time.time())
             return self.response(db, self.owned(db, release_id, owner))
 
@@ -657,13 +840,19 @@ class CapsuleWorkflow:
     def publishable(self, db, row, *, trusted_provider: str | None = None) -> bool:
         digest = row["artifact_sha256"]
         evidence = db.execute(
-            "SELECT * FROM capsule_evidence WHERE digest=? ORDER BY version DESC LIMIT 1", (digest,),
+            "SELECT * FROM capsule_evidence WHERE digest=? ORDER BY version DESC LIMIT 1",
+            (digest,),
         ).fetchone()
         provider = trusted_provider or self.trusted_provider or self.settings.scanner
         return bool(
-            digest and provider != "disabled" and row["declared_source"].startswith("https://")
-            and evidence and evidence["digest"] == digest and evidence["verdict"] == "accepted"
-            and evidence["provider"] == provider and evidence["policy_version"] == self.settings.policy_version
+            digest
+            and provider != "disabled"
+            and row["declared_source"].startswith("https://")
+            and evidence
+            and evidence["digest"] == digest
+            and evidence["verdict"] == "accepted"
+            and evidence["provider"] == provider
+            and evidence["policy_version"] == self.settings.policy_version
             and evidence["scanned_at"] <= time.time() < evidence["expires_at"]
             and self.bucket.verify(self.bucket.artifact(digest, retained=True), digest)
         )
@@ -671,15 +860,31 @@ class CapsuleWorkflow:
     def claim(self, worker: str) -> dict | None:
         now = time.time()
         with self.store.connect() as db:
-            expired = db.execute("SELECT * FROM capsule_jobs WHERE status='leased' AND lease_expires<=?", (now,)).fetchall()
+            expired = db.execute(
+                "SELECT * FROM capsule_jobs WHERE status='leased' AND lease_expires<=?",
+                (now,),
+            ).fetchall()
             for job in expired:
-                db.execute("UPDATE capsule_attempts SET finished_at=?,result='lease_expired' WHERE job_id=? AND attempt=?",
-                           (now, job["id"], job["attempts"]))
-                status = "failed" if job["attempts"] >= job["max_attempts"] else "pending"
+                db.execute(
+                    "UPDATE capsule_attempts SET finished_at=?,result='lease_expired' WHERE job_id=? AND attempt=?",
+                    (now, job["id"], job["attempts"]),
+                )
+                status = (
+                    "failed" if job["attempts"] >= job["max_attempts"] else "pending"
+                )
                 db.execute(
                     "UPDATE capsule_jobs SET status=?,lease_token=NULL,lease_owner=NULL,lease_expires=NULL,"
                     "last_error='lease_expired',next_attempt=? WHERE id=?",
-                    (status, now + min(self.settings.retry_seconds * 2 ** min(job["attempts"] - 1, 10), 3600), job["id"]),
+                    (
+                        status,
+                        now
+                        + min(
+                            self.settings.retry_seconds
+                            * 2 ** min(job["attempts"] - 1, 10),
+                            3600,
+                        ),
+                        job["id"],
+                    ),
                 )
                 if status == "failed":
                     self.job_transition(db, job["digest"], "scan_blocked", now)
@@ -697,76 +902,155 @@ class CapsuleWorkflow:
                 "UPDATE capsule_jobs SET status='leased',attempts=attempts+1,lease_token=?,lease_owner=?,lease_expires=? WHERE id=?",
                 (token, worker, now + self.settings.lease_seconds, row["id"]),
             )
-            db.execute("INSERT INTO capsule_attempts(job_id,attempt,started_at) VALUES (?,?,?)",
-                       (row["id"], row["attempts"] + 1, now))
-            return dict(db.execute("SELECT * FROM capsule_jobs WHERE id=?", (row["id"],)).fetchone())
+            db.execute(
+                "INSERT INTO capsule_attempts(job_id,attempt,started_at) VALUES (?,?,?)",
+                (row["id"], row["attempts"] + 1, now),
+            )
+            return dict(
+                db.execute(
+                    "SELECT * FROM capsule_jobs WHERE id=?", (row["id"],)
+                ).fetchone()
+            )
 
     def job_transition(self, db, digest: str, state: str, now: float):
         rows = db.execute(
             "SELECT b.release_id FROM capsule_release_artifacts b JOIN capsule_operations o USING(release_id) "
-            "WHERE b.artifact_sha256=? AND o.state='scan_pending'", (digest,),
+            "WHERE b.artifact_sha256=? AND o.state='scan_pending'",
+            (digest,),
         ).fetchall()
         for row in rows:
             self.transition(db, row["release_id"], state, now)
 
-    def complete(self, job: dict, result: ScanResult, provider: str, *, trusted_provider: str | None = None):
+    def complete(
+        self,
+        job: dict,
+        result: ScanResult,
+        provider: str,
+        *,
+        trusted_provider: str | None = None,
+    ):
         now = time.time()
         trusted_provider = trusted_provider or self.trusted_provider
         with self.store.connect() as db:
-            current = db.execute("SELECT * FROM capsule_jobs WHERE id=?", (job["id"],)).fetchone()
+            current = db.execute(
+                "SELECT * FROM capsule_jobs WHERE id=?", (job["id"],)
+            ).fetchone()
             if (
-                not current or current["status"] != "leased" or current["lease_token"] != job["lease_token"]
-                or current["lease_expires"] <= now or current["policy_version"] != self.settings.policy_version
-                or current["digest"] != job["digest"] or current["attempts"] != job["attempts"]
+                not current
+                or current["status"] != "leased"
+                or current["lease_token"] != job["lease_token"]
+                or current["lease_expires"] <= now
+                or current["policy_version"] != self.settings.policy_version
+                or current["digest"] != job["digest"]
+                or current["attempts"] != job["attempts"]
             ):
                 raise CapsuleBlocked("stale_lease")
             if (
-                not isinstance(result, ScanResult) or result.verdict not in {"accepted", "rejected", "blocked", "error"}
+                not isinstance(result, ScanResult)
+                or result.verdict not in {"accepted", "rejected", "blocked", "error"}
                 or not re.fullmatch(r"[A-Za-z0-9._:-]{1,120}", provider)
-                or not re.fullmatch(r"[A-Za-z0-9._:-]{1,200}", result.provider_result_id)
+                or not re.fullmatch(
+                    r"[A-Za-z0-9._:-]{1,200}", result.provider_result_id
+                )
                 or not re.fullmatch(r"[A-Za-z0-9._:-]{1,200}", result.summary)
             ):
                 result = ScanResult("invalid-result", "error", "scanner_invalid_result")
                 provider = "invalid"
-            if result.verdict == "accepted" and (provider == "disabled" or provider != trusted_provider):
-                result = ScanResult("untrusted-result", "blocked", "scanner_not_trusted")
+            if result.verdict == "accepted" and (
+                provider == "disabled" or provider != trusted_provider
+            ):
+                result = ScanResult(
+                    "untrusted-result", "blocked", "scanner_not_trusted"
+                )
             if result.verdict == "accepted":
                 try:
                     self.bucket.retain(job["digest"])
                 except (OSError, CapsuleBlocked):
-                    result = ScanResult("retention-failed", "error", "artifact_unavailable", retryable=True)
-            version = db.execute("SELECT COALESCE(MAX(version),0)+1 FROM capsule_evidence WHERE digest=?",
-                                 (job["digest"],)).fetchone()[0]
+                    result = ScanResult(
+                        "retention-failed",
+                        "error",
+                        "artifact_unavailable",
+                        retryable=True,
+                    )
+            version = db.execute(
+                "SELECT COALESCE(MAX(version),0)+1 FROM capsule_evidence WHERE digest=?",
+                (job["digest"],),
+            ).fetchone()[0]
             raw_reference = f"{job['digest']}-{version}.json"
             raw = self.settings.evidence / raw_reference
             scratch = self.settings.evidence / f"evidence-{secrets.token_hex(16)}.part"
             try:
                 with scratch.open("x", encoding="utf-8") as output:
                     self.bucket.restrict(scratch)
-                    json.dump({"provider": provider, "providerResultId": result.provider_result_id,
-                               "verdict": result.verdict, "summary": result.summary}, output)
+                    json.dump(
+                        {
+                            "provider": provider,
+                            "providerResultId": result.provider_result_id,
+                            "verdict": result.verdict,
+                            "summary": result.summary,
+                        },
+                        output,
+                    )
                     output.flush()
                     os.fsync(output.fileno())
                 os.replace(scratch, raw)
             finally:
                 scratch.unlink(missing_ok=True)
-            db.execute("INSERT INTO capsule_evidence VALUES (?,?,?,?,?,?,?,?,?,?)",
-                       (job["digest"], version, provider, result.provider_result_id, self.settings.policy_version,
-                        now, now + self.settings.evidence_seconds, result.verdict, result.summary, raw_reference))
-            retry = result.verdict == "error" and result.retryable and current["attempts"] < current["max_attempts"]
-            status = "pending" if retry else (
-                "blocked" if result.verdict == "blocked" else "failed" if result.verdict == "error" else "complete"
+            db.execute(
+                "INSERT INTO capsule_evidence VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (
+                    job["digest"],
+                    version,
+                    provider,
+                    result.provider_result_id,
+                    self.settings.policy_version,
+                    now,
+                    now + self.settings.evidence_seconds,
+                    result.verdict,
+                    result.summary,
+                    raw_reference,
+                ),
+            )
+            retry = (
+                result.verdict == "error"
+                and result.retryable
+                and current["attempts"] < current["max_attempts"]
+            )
+            status = (
+                "pending"
+                if retry
+                else (
+                    "blocked"
+                    if result.verdict == "blocked"
+                    else "failed" if result.verdict == "error" else "complete"
+                )
             )
             db.execute(
                 "UPDATE capsule_jobs SET status=?,next_attempt=?,last_error=?,lease_token=NULL,lease_owner=NULL,"
                 "lease_expires=NULL WHERE id=?",
-                (status, now + min(self.settings.retry_seconds * 2 ** min(current["attempts"] - 1, 10), 3600),
-                 result.summary if result.verdict in {"blocked", "error"} else None, job["id"]),
+                (
+                    status,
+                    now
+                    + min(
+                        self.settings.retry_seconds
+                        * 2 ** min(current["attempts"] - 1, 10),
+                        3600,
+                    ),
+                    result.summary if result.verdict in {"blocked", "error"} else None,
+                    job["id"],
+                ),
             )
-            db.execute("UPDATE capsule_attempts SET finished_at=?,result=? WHERE job_id=? AND attempt=?",
-                       (now, result.summary, job["id"], current["attempts"]))
+            db.execute(
+                "UPDATE capsule_attempts SET finished_at=?,result=? WHERE job_id=? AND attempt=?",
+                (now, result.summary, job["id"], current["attempts"]),
+            )
             if not retry:
-                target = {"accepted": "publishable", "rejected": "rejected", "blocked": "scan_blocked", "error": "scan_blocked"}[result.verdict]
+                target = {
+                    "accepted": "publishable",
+                    "rejected": "rejected",
+                    "blocked": "scan_blocked",
+                    "error": "scan_blocked",
+                }[result.verdict]
                 if target == "publishable":
                     rows = db.execute(
                         "SELECT r.*,b.artifact_sha256 FROM capsule_releases r JOIN capsule_release_artifacts b USING(release_id) "
@@ -774,14 +1058,33 @@ class CapsuleWorkflow:
                         (job["digest"],),
                     ).fetchall()
                     for row in rows:
-                        self.transition(db, row["release_id"],
-                                        "publishable" if self.publishable(db, row, trusted_provider=trusted_provider) else "scan_blocked", now)
+                        self.transition(
+                            db,
+                            row["release_id"],
+                            (
+                                "publishable"
+                                if self.publishable(
+                                    db, row, trusted_provider=trusted_provider
+                                )
+                                else "scan_blocked"
+                            ),
+                            now,
+                        )
                 else:
                     self.job_transition(db, job["digest"], target, now)
             if status == "failed":
-                logger.warning("capsule_scan_failed", extra={"job_id": job["id"], "attempts": current["attempts"]})
+                logger.warning(
+                    "capsule_scan_failed",
+                    extra={"job_id": job["id"], "attempts": current["attempts"]},
+                )
 
-    def process_one(self, worker: str, scanner: Scanner | None = None, *, trusted_provider: str | None = None) -> bool:
+    def process_one(
+        self,
+        worker: str,
+        scanner: Scanner | None = None,
+        *,
+        trusted_provider: str | None = None,
+    ) -> bool:
         job = self.claim(worker)
         if job is None:
             return False
@@ -793,10 +1096,12 @@ class CapsuleWorkflow:
                 result = ScanResult("missing-artifact", "error", "artifact_unavailable")
             else:
                 result = scanner.scan(job["digest"], path)
-        except Exception:
+        except Exception:  # noqa: BLE001
             # Provider exception text can contain credentials, URLs or local paths.
             logger.warning("capsule_scanner_exception", extra={"job_id": job["id"]})
-            result = ScanResult("scanner-error", "error", "scanner_error", retryable=True)
+            result = ScanResult(
+                "scanner-error", "error", "scanner_error", retryable=True
+            )
         self.complete(job, result, scanner.provider, trusted_provider=trusted_provider)
         if time.monotonic() - start > self.settings.lease_seconds / 2:
             logger.warning("capsule_slow_job", extra={"job_id": job["id"]})
@@ -822,27 +1127,48 @@ class CapsuleWorkflow:
                 self.transition(db, row["release_id"], "expired", now)
                 expired += 1
             for row in db.execute(
-                "SELECT release_id FROM capsule_operations WHERE state='uploading' AND upload_expires<=?", (now,),
+                "SELECT release_id FROM capsule_operations WHERE state='uploading' AND upload_expires<=?",
+                (now,),
             ).fetchall():
                 self.transition(db, row["release_id"], "reserved", now)
-            live = {row[0] for row in db.execute(
-                "SELECT DISTINCT artifact_sha256 FROM capsule_release_artifacts b JOIN capsule_operations o USING(release_id) "
-                "WHERE o.state NOT IN ('expired','withdrawn') OR o.updated_at>?",
-                (now - self.settings.expiry_seconds,),
-            )}
-            leased = {row[0] for row in db.execute(
-                "SELECT digest FROM capsule_jobs WHERE status='leased' AND lease_expires>?", (now,),
-            )}
-            uploading = {f"upload-{row[0]}.part" for row in db.execute(
-                "SELECT upload_token FROM capsule_operations WHERE state='uploading' AND upload_expires>?",
-                (now,),
-            )}
+            live = {
+                row[0]
+                for row in db.execute(
+                    "SELECT DISTINCT artifact_sha256 FROM capsule_release_artifacts b JOIN capsule_operations o USING(release_id) "
+                    "WHERE o.state NOT IN ('expired','withdrawn') OR o.updated_at>?",
+                    (now - self.settings.expiry_seconds,),
+                )
+            }
+            leased = {
+                row[0]
+                for row in db.execute(
+                    "SELECT digest FROM capsule_jobs WHERE status='leased' AND lease_expires>?",
+                    (now,),
+                )
+            }
+            uploading = {
+                f"upload-{row[0]}.part"
+                for row in db.execute(
+                    "SELECT upload_token FROM capsule_operations WHERE state='uploading' AND upload_expires>?",
+                    (now,),
+                )
+            }
             for root in (self.settings.quarantine, self.settings.retained):
                 for path in root.glob("*.jar"):
-                    if path.stem not in live | leased and path.stat().st_mtime < now - self.settings.expiry_seconds:
+                    if (
+                        path.stem not in live | leased
+                        and path.stat().st_mtime < now - self.settings.expiry_seconds
+                    ):
                         path.unlink()
-            for root in (self.settings.quarantine, self.settings.retained, self.settings.evidence):
+            for root in (
+                self.settings.quarantine,
+                self.settings.retained,
+                self.settings.evidence,
+            ):
                 for path in root.glob("*.part"):
-                    if path.name not in uploading and path.stat().st_mtime < now - self.settings.expiry_seconds:
+                    if (
+                        path.name not in uploading
+                        and path.stat().st_mtime < now - self.settings.expiry_seconds
+                    ):
                         path.unlink()
         return expired

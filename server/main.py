@@ -7,7 +7,7 @@ import sqlite3
 import threading
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Any, Literal
 from urllib.parse import quote, urlsplit
@@ -132,6 +132,7 @@ class ReleaseManifest(BaseModel):
     curseforgeMods: list[dict[str, Any]] = Field(default_factory=list)
     modsDir: str | None = "mods"
 
+
 @dataclass(frozen=True)
 class PackageSnapshot:
     root: Path
@@ -153,7 +154,7 @@ def load_mod_metadata(root: Path = RELEASE_DIR) -> dict[str, dict[str, object]]:
         ) from exc
 
     if not isinstance(data, dict):
-        raise RuntimeError("mods.json must contain an object keyed by JAR filename")
+        raise TypeError("mods.json must contain an object keyed by JAR filename")
 
     metadata: dict[str, dict[str, object]] = {}
     for filename, details in data.items():
@@ -185,7 +186,9 @@ def load_mod_metadata(root: Path = RELEASE_DIR) -> dict[str, dict[str, object]]:
     return metadata
 
 
-def load_mods(root: Path = RELEASE_DIR, metadata_root: Path | None = None) -> dict[str, dict[str, str]]:
+def load_mods(
+    root: Path = RELEASE_DIR, metadata_root: Path | None = None
+) -> dict[str, dict[str, str]]:
     mods_dir = root / "mods"
     metadata = load_mod_metadata(metadata_root if metadata_root is not None else root)
     mods: dict[str, dict[str, str]] = {}
@@ -247,7 +250,8 @@ logger = logging.getLogger("mars-package-api")
 
 
 def build_mod_inventory(
-    root: Path = RELEASE_DIR, metadata_root: Path | None = None,
+    root: Path = RELEASE_DIR,
+    metadata_root: Path | None = None,
 ) -> dict[str, dict[str, Any]]:
     mods = load_mods(root, metadata_root)
     inventory: dict[str, dict[str, Any]] = {}
@@ -338,7 +342,8 @@ def build_release_manifest(
             subdirectories[:] = sorted(
                 name
                 for name in subdirectories
-                if not (current_path / name).is_symlink() and not (current_path / name).is_junction()
+                if not (current_path / name).is_symlink()
+                and not (current_path / name).is_junction()
             )
             for filename in sorted(filenames, key=str.casefold):
                 path = current_path / filename
@@ -377,7 +382,7 @@ def build_release_manifest(
         minecraftVersion=MINECRAFT_VERSION,
         loader=LOADER,
         loaderVersion=LOADER_VERSION,
-        generatedAt=datetime.now(timezone.utc).isoformat(),
+        generatedAt=datetime.now(UTC).isoformat(),
         managedDirs=list(MANAGED_DIRS),
         files=files,
         modsDir="mods",
@@ -416,7 +421,9 @@ def load_package_snapshot(root: Path, published: bool = False) -> PackageSnapsho
     mods = build_mod_inventory(root, metadata_root=RELEASE_DIR)
     manifest, files = build_release_manifest(mods, root)
     if published:
-        signed = ReleaseManifest.model_validate_json((root / "manifest.json").read_bytes())
+        signed = ReleaseManifest.model_validate_json(
+            (root / "manifest.json").read_bytes()
+        )
         expected = {entry.path: (entry.sha256, entry.size) for entry in signed.files}
         actual = {entry.path: (entry.sha256, entry.size) for entry in manifest.files}
         if expected != actual:
@@ -435,13 +442,19 @@ def current_package_snapshot() -> PackageSnapshot:
                 app.state.package_snapshot_id = identifier
             return app.state.package_snapshot
     except (OSError, sqlite3.Error, RuntimeError, ValueError):
-        logger.error("The active release could not be loaded; refusing to serve a stale release")
-        raise HTTPException(status_code=503, detail="Active release storage is unavailable")
+        logger.error(
+            "The active release could not be loaded; refusing to serve a stale release"
+        )
+        raise HTTPException(
+            status_code=503, detail="Active release storage is unavailable"
+        )
 
 
 app.state.release_publisher = install_publishing(
     app,
-    PublishSettings.from_env(RELEASE_DIR, MANAGED_DIRS, MINECRAFT_VERSION, LOADER, LOADER_VERSION),
+    PublishSettings.from_env(
+        RELEASE_DIR, MANAGED_DIRS, MINECRAFT_VERSION, LOADER, LOADER_VERSION
+    ),
     lambda root: load_package_snapshot(root, published=True),
 )
 
@@ -513,7 +526,8 @@ def get_release_manifest(
             update={
                 "downloadUrl": (
                     f"{PUBLIC_API_BASE_URL}{item.downloadUrl}"
-                    if item.downloadUrl.startswith("/") else item.downloadUrl
+                    if item.downloadUrl.startswith("/")
+                    else item.downloadUrl
                 ),
             }
         )
@@ -665,7 +679,7 @@ def health() -> dict:
     return {
         "service": "mars-package-api",
         "status": "nominal",
-        "time": datetime.now(timezone.utc).isoformat(),
+        "time": datetime.now(UTC).isoformat(),
     }
 
 
@@ -674,7 +688,7 @@ if DEV_TOKEN_ENABLED:
 
     @app.post("/api/v1/dev-token")
     def create_dev_token() -> dict:
-        expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
+        expires_at = datetime.now(UTC) + timedelta(hours=1)
 
         token = jwt.encode(
             {
