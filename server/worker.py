@@ -3,7 +3,6 @@
 import argparse
 import json
 import logging
-import os
 import signal
 import threading
 from pathlib import Path
@@ -60,7 +59,7 @@ def main() -> int:
         try:
             workflow.cleanup()
             processed = workflow.process_one(args.worker_id)
-        except Exception:
+        except Exception:  # noqa: BLE001
             # A crashed/failed storage attempt remains leased for fenced recovery.
             logging.getLogger("mars-capsules").error("capsule_worker_operation_failed")
             if args.once:

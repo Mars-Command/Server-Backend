@@ -6,7 +6,7 @@ import sqlite3
 from collections.abc import Iterable
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -125,7 +125,8 @@ class CapsuleRegistry:
             release_id=row["release_id"],
             uploader_id=row["uploader_id"],
             metadata=CapsuleMetadata(
-                project=row["project"], version=row["version"],
+                project=row["project"],
+                version=row["version"],
                 declared_source=row["declared_source"],
             ),
             created_at=row["created_at"],
@@ -139,8 +140,12 @@ class CapsuleRegistry:
             db.execute(
                 "INSERT INTO capsule_releases VALUES (?, ?, ?, ?, ?, ?)",
                 (
-                    release_id, uploader_id, metadata.project, metadata.version,
-                    metadata.declared_source, datetime.now(timezone.utc).isoformat(),
+                    release_id,
+                    uploader_id,
+                    metadata.project,
+                    metadata.version,
+                    metadata.declared_source,
+                    datetime.now(UTC).isoformat(),
                 ),
             )
             return self._capsule(self._owned(db, release_id, uploader_id))
@@ -150,7 +155,11 @@ class CapsuleRegistry:
             return self._capsule(self._owned(db, release_id, uploader_id))
 
     def observe(
-        self, release_id: str, uploader_id: str, chunks: Iterable[bytes], *,
+        self,
+        release_id: str,
+        uploader_id: str,
+        chunks: Iterable[bytes],
+        *,
         max_bytes: int,
     ) -> ReleaseCapsule:
         """Hash backend-observed bytes, not a supplied checksum. Does not store bytes."""
@@ -164,7 +173,7 @@ class CapsuleRegistry:
         size = 0
         for chunk in chunks:
             if not isinstance(chunk, bytes):
-                raise ValueError("Observation requires bytes")
+                raise TypeError("Observation requires bytes")
             size += len(chunk)
             if size > max_bytes:
                 raise CapsuleBlocked("artifact_too_large")
