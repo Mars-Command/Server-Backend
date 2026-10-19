@@ -20,7 +20,9 @@ from fastapi.testclient import TestClient
 from server import community
 from server.capsules import CapsuleBlocked
 from server.ingestion import (
-    CapsuleWorkflow, PrivateBucket, ScanResult,
+    CapsuleWorkflow,
+    PrivateBucket,
+    ScanResult,
 )
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -28,20 +30,26 @@ WORK = ROOT / ".test-work"
 OWNER = "github:123"
 OTHER = "github:456"
 ORIGIN = "https://website.example.com"
-METADATA = {"project": "Example", "version": "1.0", "sourceUrl": "https://modrinth.com/mod/example"}
+METADATA = {
+    "project": "Example",
+    "version": "1.0",
+    "sourceUrl": "https://modrinth.com/mod/example",
+}
 
 
 def jar(entries=None):
     output = io.BytesIO()
     with zipfile.ZipFile(output, "w") as archive:
-        for name, data in (entries or {"META-INF/MANIFEST.MF": b"Manifest-Version: 1.0\n"}).items():
+        for name, data in (
+            entries or {"META-INF/MANIFEST.MF": b"Manifest-Version: 1.0\n"}
+        ).items():
             archive.writestr(name, data)
     return output.getvalue()
 
 
 async def chunks(data):
     for start in range(0, len(data), 17):
-        yield data[start:start + 17]
+        yield data[start : start + 17]
 
 
 @pytest.fixture
@@ -50,8 +58,10 @@ def env():
     folder = WORK / secrets.token_hex(8)
     folder.mkdir()
     settings = community.Settings(
-        website_url=ORIGIN, backend_url="https://api.example.com",
-        jwt_secret="test-community-" + "a" * 40, database=str(folder / "community.sqlite3"),
+        website_url=ORIGIN,
+        backend_url="https://api.example.com",
+        jwt_secret="test-community-" + "a" * 40,
+        database=str(folder / "community.sqlite3"),
     )
     app = FastAPI()
     community.install_community(app, settings)
@@ -68,25 +78,50 @@ def env():
 
 def reserve(workflow, owner=OWNER, key=None, **metadata):
     values = {**METADATA, **metadata}
-    return workflow.reserve(owner, values["project"], values["version"], values["sourceUrl"], key or secrets.token_hex(8))
+    return workflow.reserve(
+        owner,
+        values["project"],
+        values["version"],
+        values["sourceUrl"],
+        key or secrets.token_hex(8),
+    )
 
 
 def upload(workflow, release, data=None):
-    return asyncio.run(workflow.upload(release["releaseId"], release["ownerId"], chunks(jar() if data is None else data)))
+    return asyncio.run(
+        workflow.upload(
+            release["releaseId"],
+            release["ownerId"],
+            chunks(jar() if data is None else data),
+        )
+    )
 
 
 def token(settings, owner=OWNER):
     now = int(time.time())
-    return jwt.encode({
-        "sub": owner, "aud": community.DESKTOP_AUDIENCE, "iss": community.ISSUER,
-        "iat": now - 1, "exp": now + 300, "jti": secrets.token_hex(8), "scope": "community",
-    }, settings.jwt_secret, algorithm="HS256")
+    return jwt.encode(
+        {
+            "sub": owner,
+            "aud": community.DESKTOP_AUDIENCE,
+            "iss": community.ISSUER,
+            "iat": now - 1,
+            "exp": now + 300,
+            "jti": secrets.token_hex(8),
+            "scope": "community",
+        },
+        settings.jwt_secret,
+        algorithm="HS256",
+    )
 
 
 class DeterministicScanner:
     provider = "deterministic-test"
 
-    def __init__(self, verdict: Literal["accepted", "rejected", "blocked", "error"] = "accepted", retryable=False):
+    def __init__(
+        self,
+        verdict: Literal["accepted", "rejected", "blocked", "error"] = "accepted",
+        retryable=False,
+    ):
         self.verdict: Literal["accepted", "rejected", "blocked", "error"] = verdict
         self.retryable = retryable
         self.calls = 0
@@ -94,11 +129,15 @@ class DeterministicScanner:
     def scan(self, digest, path):
         assert PrivateBucket.verify(path, digest)
         self.calls += 1
-        return ScanResult("test-result", self.verdict, "test_" + self.verdict, self.retryable)
+        return ScanResult(
+            "test-result", self.verdict, "test_" + self.verdict, self.retryable
+        )
 
 
 def trusted(workflow):
-    return CapsuleWorkflow(workflow.store, workflow.settings, trusted_provider="deterministic-test")
+    return CapsuleWorkflow(
+        workflow.store, workflow.settings, trusted_provider="deterministic-test"
+    )
 
 
 def test_reserve_idempotent_and_owner_scoped_cap(env):
@@ -157,19 +196,37 @@ def test_stream_hash_retry_dedup_and_disabled_worker(env):
     with workflow.store.connect() as db:
         assert db.execute("SELECT count(*) FROM capsule_jobs").fetchone()[0] == 1
         assert db.execute("SELECT count(*) FROM capsule_artifacts").fetchone()[0] == 1
-        assert [r[0] for r in db.execute("SELECT state FROM capsule_transitions WHERE release_id=? ORDER BY revision",
-                                        (first["releaseId"],))] == [
-            "reserved", "uploading", "quarantined", "scan_pending", "scan_blocked",
+        assert [
+            r[0]
+            for r in db.execute(
+                "SELECT state FROM capsule_transitions WHERE release_id=? ORDER BY revision",
+                (first["releaseId"],),
+            )
+        ] == [
+            "reserved",
+            "uploading",
+            "quarantined",
+            "scan_pending",
+            "scan_blocked",
         ]
 
 
-@pytest.mark.parametrize("data,code", [
-    (b"", "artifact_empty"), (b"not-a-jar", "artifact_invalid"),
-    (jar({"../escape.class": b"x"}), "artifact_invalid"),
-    (jar({"C:/escape.class": b"x"}), "artifact_invalid"),
-    (jar({"a/escape.class": b"x"}).replace(b"a/escape.class", b"a\\escape.class"), "artifact_invalid"),
-    (jar({"readme.txt": b"x"}), "artifact_invalid"),
-])
+@pytest.mark.parametrize(
+    "data,code",
+    [
+        (b"", "artifact_empty"),
+        (b"not-a-jar", "artifact_invalid"),
+        (jar({"../escape.class": b"x"}), "artifact_invalid"),
+        (jar({"C:/escape.class": b"x"}), "artifact_invalid"),
+        (
+            jar({"a/escape.class": b"x"}).replace(
+                b"a/escape.class", b"a\\escape.class"
+            ),
+            "artifact_invalid",
+        ),
+        (jar({"readme.txt": b"x"}), "artifact_invalid"),
+    ],
+)
 def test_invalid_archive_or_empty_upload_rolls_back(env, data, code):
     workflow, _, _, _ = env
     release = reserve(workflow)
@@ -241,23 +298,42 @@ def test_lease_claim_is_atomic_stale_completion_and_recovery(env, monkeypatch):
     first = jobs[0]
     clock[0] += workflow.settings.lease_seconds + 1
     with pytest.raises(CapsuleBlocked, match="stale_lease"):
-        workflow.complete(first, ScanResult("old", "accepted", "test_accepted"), "deterministic-test", trusted_provider="deterministic-test")
+        workflow.complete(
+            first,
+            ScanResult("old", "accepted", "test_accepted"),
+            "deterministic-test",
+            trusted_provider="deterministic-test",
+        )
     assert workflow.claim("recovery") is None
     clock[0] += workflow.settings.retry_seconds + 1
     next_job = workflow.claim("recovery")
     assert next_job["attempts"] == 2 and next_job["lease_token"] != first["lease_token"]
     with pytest.raises(CapsuleBlocked, match="stale_lease"):
-        workflow.complete(first, ScanResult("old", "blocked", "test_blocked"), "disabled")
-    workflow.complete(next_job, ScanResult("new", "blocked", "test_blocked"), "disabled")
+        workflow.complete(
+            first, ScanResult("old", "blocked", "test_blocked"), "disabled"
+        )
+    workflow.complete(
+        next_job, ScanResult("new", "blocked", "test_blocked"), "disabled"
+    )
     with workflow.store.connect() as db:
-        assert db.execute("SELECT result FROM capsule_attempts WHERE attempt=1").fetchone()[0] == "lease_expired"
+        assert (
+            db.execute(
+                "SELECT result FROM capsule_attempts WHERE attempt=1"
+            ).fetchone()[0]
+            == "lease_expired"
+        )
         assert db.execute("SELECT count(*) FROM capsule_evidence").fetchone()[0] == 1
 
 
-@pytest.mark.parametrize("verdict,state", [
-    ("accepted", "publishable"), ("rejected", "rejected"),
-    ("blocked", "scan_blocked"), ("error", "scan_blocked"),
-])
+@pytest.mark.parametrize(
+    "verdict,state",
+    [
+        ("accepted", "publishable"),
+        ("rejected", "rejected"),
+        ("blocked", "scan_blocked"),
+        ("error", "scan_blocked"),
+    ],
+)
 def test_normalized_scanner_results_and_private_gate(env, verdict, state):
     workflow = trusted(env[0])
     release = upload(workflow, reserve(workflow))
@@ -269,7 +345,9 @@ def test_normalized_scanner_results_and_private_gate(env, verdict, state):
     assert result["evidence"]["version"] == 1
     assert result["evidence"]["verdict"] == verdict
     with workflow.store.connect() as db:
-        assert workflow.publishable(db, workflow.owned(db, release["releaseId"], OWNER)) == (verdict == "accepted")
+        assert workflow.publishable(
+            db, workflow.owned(db, release["releaseId"], OWNER)
+        ) == (verdict == "accepted")
         with pytest.raises(sqlite3.IntegrityError):
             db.execute("UPDATE capsule_evidence SET verdict='accepted'")
     if verdict == "rejected":
@@ -281,7 +359,10 @@ def test_untrusted_or_malformed_scanner_can_never_accept(env):
     workflow = env[0]
     release = upload(workflow, reserve(workflow))
     workflow.process_one("worker", DeterministicScanner())
-    assert workflow.get(release["releaseId"], OWNER)["evidence"]["summary"] == "scanner_not_trusted"
+    assert (
+        workflow.get(release["releaseId"], OWNER)["evidence"]["summary"]
+        == "scanner_not_trusted"
+    )
     workflow.retry(release["releaseId"], OWNER)
     job = workflow.claim("worker")
     workflow.complete(job, {"verdict": "accepted"}, "bad")
@@ -335,7 +416,9 @@ def test_retention_missing_or_modified_is_not_publishable(env):
     workflow = trusted(env[0])
     release = upload(workflow, reserve(workflow))
     workflow.process_one("worker", DeterministicScanner())
-    workflow.bucket.artifact(release["artifactSha256"], retained=True).write_bytes(b"changed")
+    workflow.bucket.artifact(release["artifactSha256"], retained=True).write_bytes(
+        b"changed"
+    )
     assert workflow.get(release["releaseId"], OWNER)["state"] == "scan_blocked"
 
 
@@ -346,7 +429,9 @@ def test_withdraw_during_lease_cannot_revive_release(env):
     assert job is not None
     result = workflow.withdraw(release["releaseId"], OWNER)
     assert workflow.withdraw(release["releaseId"], OWNER) == result
-    workflow.complete(job, ScanResult("accepted", "accepted", "test_accepted"), "deterministic-test")
+    workflow.complete(
+        job, ScanResult("accepted", "accepted", "test_accepted"), "deterministic-test"
+    )
     assert workflow.get(release["releaseId"], OWNER)["state"] == "withdrawn"
     with pytest.raises(CapsuleBlocked, match="invalid_state"):
         upload(workflow, release)
@@ -372,12 +457,21 @@ def test_cleanup_expiry_reservation_and_shared_bytes(env, monkeypatch):
     assert not workflow.process_one("worker")
 
 
-@pytest.mark.parametrize("field,value", [
-    ("max_bytes", 0), ("max_active", -1), ("max_attempts", True),
-    ("expiry_seconds", 0), ("lease_seconds", 0), ("scanner", "clean"),
-    ("quarantine", Path("relative")), ("quarantine", ROOT / "output" / "quarantine"),
-    ("quarantine", ROOT / "static"), ("retained", ROOT),
-])
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("max_bytes", 0),
+        ("max_active", -1),
+        ("max_attempts", True),
+        ("expiry_seconds", 0),
+        ("lease_seconds", 0),
+        ("scanner", "clean"),
+        ("quarantine", Path("relative")),
+        ("quarantine", ROOT / "output" / "quarantine"),
+        ("quarantine", ROOT / "static"),
+        ("retained", ROOT),
+    ],
+)
 def test_storage_settings_fail_closed(env, field, value):
     with pytest.raises(ValueError):
         replace(env[0].settings, **{field: value})
@@ -392,59 +486,134 @@ def test_bucket_permissions(env):
         assert path.parent.stat().st_mode & 0o777 == 0o700
     else:
         import subprocess
-        acl = subprocess.run(["icacls", str(path)], check=True, capture_output=True, text=True).stdout
+
+        acl = subprocess.run(
+            ["icacls", str(path)], check=True, capture_output=True, text=True
+        ).stdout
         assert "(I)" not in acl
         assert "Everyone" not in acl and "BUILTIN\\Users" not in acl
 
 
 def test_authenticated_http_contract_ownership_csrf_no_download(env):
     workflow, client, settings, folder = env
-    headers = {"Authorization": "Bearer " + token(settings), "Idempotency-Key": "request-1"}
+    headers = {
+        "Authorization": "Bearer " + token(settings),
+        "Idempotency-Key": "request-1",
+    }
     result = client.post("/api/community/capsules", json=METADATA, headers=headers)
     assert result.status_code == 201
     release = result.json()
-    assert client.post("/api/community/capsules", json=METADATA, headers=headers).json() == release
+    assert (
+        client.post("/api/community/capsules", json=METADATA, headers=headers).json()
+        == release
+    )
     route = "/api/community/capsules/" + release["releaseId"]
     assert client.get(route).status_code == 401
-    assert client.get(route, headers={"Authorization": "Bearer " + token(settings, OTHER)}).status_code == 404
-    result = client.put(route + "/artifact", content=jar(), headers={**headers, "Content-Type": "application/java-archive"})
+    assert (
+        client.get(
+            route, headers={"Authorization": "Bearer " + token(settings, OTHER)}
+        ).status_code
+        == 404
+    )
+    result = client.put(
+        route + "/artifact",
+        content=jar(),
+        headers={**headers, "Content-Type": "application/java-archive"},
+    )
     assert result.status_code == 200 and result.json()["state"] == "scan_pending"
     assert result.headers["cache-control"] == "no-store"
     assert str(folder) not in result.text and "lease_token" not in result.text
-    assert client.get("/api/community/capsules/mine", headers=headers).json()["capsules"] == [result.json()]
+    assert client.get("/api/community/capsules/mine", headers=headers).json()[
+        "capsules"
+    ] == [result.json()]
     assert client.get(route + "/artifact", headers=headers).status_code == 405
     assert client.get(route + "/download", headers=headers).status_code == 404
     assert client.get("/api/community/capsules", headers=headers).status_code == 405
     with workflow.store.connect() as db:
-        db.execute("INSERT INTO sessions VALUES (?,?,?)", (community.digest("session"), OWNER, time.time() + 1000))
-    client.cookies.set(community.SESSION_COOKIE, "session", domain="api.example.com", path="/api")
+        db.execute(
+            "INSERT INTO sessions VALUES (?,?,?)",
+            (community.digest("session"), OWNER, time.time() + 1000),
+        )
+    client.cookies.set(
+        community.SESSION_COOKIE, "session", domain="api.example.com", path="/api"
+    )
     assert client.post(route + "/withdraw").status_code == 403
-    assert client.post(route + "/withdraw", headers={"Origin": ORIGIN + "/"}).status_code == 403
-    assert client.post(route + "/withdraw", headers={"Origin": ORIGIN}).json()["state"] == "withdrawn"
-    preflight = client.options(route + "/artifact", headers={
-        "Origin": ORIGIN, "Access-Control-Request-Method": "PUT",
-        "Access-Control-Request-Headers": "content-type,idempotency-key",
-    })
+    assert (
+        client.post(route + "/withdraw", headers={"Origin": ORIGIN + "/"}).status_code
+        == 403
+    )
+    assert (
+        client.post(route + "/withdraw", headers={"Origin": ORIGIN}).json()["state"]
+        == "withdrawn"
+    )
+    preflight = client.options(
+        route + "/artifact",
+        headers={
+            "Origin": ORIGIN,
+            "Access-Control-Request-Method": "PUT",
+            "Access-Control-Request-Headers": "content-type,idempotency-key",
+        },
+    )
     assert preflight.status_code == 200
     schema = client.get("/openapi.json").json()
-    assert "application/java-archive" in schema["paths"][route.replace(release["releaseId"], "{release_id}") + "/artifact"]["put"]["requestBody"]["content"]
+    assert (
+        "application/java-archive"
+        in schema["paths"][
+            route.replace(release["releaseId"], "{release_id}") + "/artifact"
+        ]["put"]["requestBody"]["content"]
+    )
 
 
 def test_http_metadata_bounds_media_body_limits_and_storage_privacy(env, monkeypatch):
     workflow, client, settings, _ = env
     headers = {"Authorization": "Bearer " + token(settings), "Idempotency-Key": "key"}
-    for changes in ({"sourceUrl": "http://example.com"}, {"sourceUrl": "https://127.0.0.1/x"},
-                    {"sourceUrl": "https://u:p@example.com/x"}, {"project": ""}, {"sha256": "a" * 64}):
-        assert client.post("/api/community/capsules", json={**METADATA, **changes}, headers=headers).status_code == 422
-    assert client.post("/api/community/capsules", json=METADATA, headers={"Authorization": headers["Authorization"]}).status_code == 422
-    release = client.post("/api/community/capsules", json=METADATA, headers=headers).json()
+    for changes in (
+        {"sourceUrl": "http://example.com"},
+        {"sourceUrl": "https://127.0.0.1/x"},
+        {"sourceUrl": "https://u:p@example.com/x"},
+        {"project": ""},
+        {"sha256": "a" * 64},
+    ):
+        assert (
+            client.post(
+                "/api/community/capsules", json={**METADATA, **changes}, headers=headers
+            ).status_code
+            == 422
+        )
+    assert (
+        client.post(
+            "/api/community/capsules",
+            json=METADATA,
+            headers={"Authorization": headers["Authorization"]},
+        ).status_code
+        == 422
+    )
+    release = client.post(
+        "/api/community/capsules", json=METADATA, headers=headers
+    ).json()
     route = "/api/community/capsules/" + release["releaseId"] + "/artifact"
     assert client.put(route, content=jar(), headers=headers).status_code == 415
     workflow.settings = replace(workflow.settings, max_bytes=20)
-    assert client.put(route, content=jar(), headers={**headers, "Content-Type": "application/octet-stream"}).status_code == 413
-    assert client.post("/api/community/capsules", content=b"x" * (community.MAX_BODY + 1), headers=headers).status_code == 413
+    assert (
+        client.put(
+            route,
+            content=jar(),
+            headers={**headers, "Content-Type": "application/octet-stream"},
+        ).status_code
+        == 413
+    )
+    assert (
+        client.post(
+            "/api/community/capsules",
+            content=b"x" * (community.MAX_BODY + 1),
+            headers=headers,
+        ).status_code
+        == 413
+    )
+
     def broken(*_args, **_kwargs):
         raise OSError("secret-token and private-path")
+
     monkeypatch.setattr(workflow, "reserve", broken)
     response = client.post("/api/community/capsules", json=METADATA, headers=headers)
     assert response.status_code == 503 and "secret-token" not in response.text
@@ -453,15 +622,18 @@ def test_http_metadata_bounds_media_body_limits_and_storage_privacy(env, monkeyp
 def test_upload_owner_check_does_not_consume_stream(env):
     workflow = env[0]
     release = reserve(workflow)
+
     async def unread():
         pytest.fail("Unowned upload consumed bytes")
         yield b"unused"
+
     with pytest.raises(CapsuleBlocked, match="release_not_found"):
         asyncio.run(workflow.upload(release["releaseId"], OTHER, unread()))
 
 
 def test_worker_command_disabled_scanner(env, monkeypatch):
     from server import worker
+
     workflow, _, settings, _ = env
     release = upload(workflow, reserve(workflow))
     monkeypatch.setattr(worker.Settings, "from_env", lambda: settings)
@@ -475,7 +647,9 @@ def test_database_state_and_history_guards(env):
     release = reserve(workflow)
     with workflow.store.connect() as db:
         with pytest.raises(sqlite3.IntegrityError):
-            db.execute("UPDATE capsule_operations SET state='publishable',revision=revision+1")
+            db.execute(
+                "UPDATE capsule_operations SET state='publishable',revision=revision+1"
+            )
         with pytest.raises(sqlite3.IntegrityError):
             db.execute("UPDATE capsule_operations SET state='uploading'")
         with pytest.raises(sqlite3.IntegrityError):
@@ -523,16 +697,24 @@ def test_cleanup_demotes_expired_evidence(env, monkeypatch):
     monkeypatch.setattr("server.ingestion.time.time", lambda: future)
     workflow.cleanup()
     with workflow.store.connect() as db:
-        assert workflow.owned(db, release["releaseId"], OWNER)["state"] == "scan_blocked"
+        assert (
+            workflow.owned(db, release["releaseId"], OWNER)["state"] == "scan_blocked"
+        )
 
 
 def test_migrates_existing_internal_capsule_facts(env):
     from server.capsules import CapsuleMetadata, CapsuleRegistry
+
     workflow = env[0]
     registry = CapsuleRegistry(workflow.store)
-    release = registry.reserve(OWNER, CapsuleMetadata(
-        project="Legacy", version="1", declared_source="https://example.com/mod",
-    ))
+    release = registry.reserve(
+        OWNER,
+        CapsuleMetadata(
+            project="Legacy",
+            version="1",
+            declared_source="https://example.com/mod",
+        ),
+    )
     community.Store(workflow.store.path)
     migrated = workflow.get(release.release_id, OWNER)
     assert migrated["state"] == "reserved"
@@ -542,8 +724,10 @@ def test_migrates_existing_internal_capsule_facts(env):
 def test_diagnostic_formatter_only_emits_allowed_context():
     import logging
     from server.worker import DiagnosticFormatter
-    record = logging.LogRecord("mars-capsules", logging.WARNING, "", 0,
-                               "capsule_scan_failed", (), None)
+
+    record = logging.LogRecord(
+        "mars-capsules", logging.WARNING, "", 0, "capsule_scan_failed", (), None
+    )
     record.job_id = 1
     record.attempts = 3
     record.provider_secret = "do-not-log"
@@ -552,7 +736,9 @@ def test_diagnostic_formatter_only_emits_allowed_context():
     assert "do-not-log" not in output
 
 
-def test_worker_loads_env_files_without_overriding_process_environment(tmp_path, monkeypatch):
+def test_worker_loads_env_files_without_overriding_process_environment(
+    tmp_path, monkeypatch
+):
     from server import worker
 
     monkeypatch.setattr(worker, "PROJECT_ROOT", tmp_path)

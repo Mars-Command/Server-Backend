@@ -6,3 +6,4 @@ pyjwt
 httpx>=0.28,<1
 python-dotenv
 cryptography>=46
+black

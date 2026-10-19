@@ -14,7 +14,11 @@ from server.community import Store
 WORK = Path(__file__).resolve().parent.parent / ".test-work"
 ALICE = "github:123"
 BOB = "github:456"
-METADATA = {"project": "Example", "version": "1.0", "declared_source": "Author declaration"}
+METADATA = {
+    "project": "Example",
+    "version": "1.0",
+    "declared_source": "Author declaration",
+}
 
 
 @pytest.fixture
@@ -67,9 +71,12 @@ def test_capsule_schema_migrates_on_reopen_without_losing_community_data(registr
 
     reopened = CapsuleRegistry(Store(registry.store.path))
     with reopened.store.connect() as db:
-        assert db.execute(
-            "SELECT name FROM profiles WHERE id='legacy-profile'"
-        ).fetchone()[0] == "Legacy"
+        assert (
+            db.execute(
+                "SELECT name FROM profiles WHERE id='legacy-profile'"
+            ).fetchone()[0]
+            == "Legacy"
+        )
         tables = {
             row[0]
             for row in db.execute(
@@ -89,11 +96,17 @@ def test_capsule_schema_migrates_on_reopen_without_losing_community_data(registr
 
 def test_observed_checksum_deduplicates_bytes_not_release_or_provenance(registry):
     first = reserve(registry)
-    second = reserve(registry, BOB, version="2.0", declared_source="Different declaration")
+    second = reserve(
+        registry, BOB, version="2.0", declared_source="Different declaration"
+    )
     first = registry.observe(first.release_id, ALICE, [b"ja", b"r"], max_bytes=3)
     second = registry.observe(second.release_id, BOB, [b"jar"], max_bytes=3)
     assert first.release_id != second.release_id
-    assert first.artifact_sha256 == second.artifact_sha256 == hashlib.sha256(b"jar").hexdigest()
+    assert (
+        first.artifact_sha256
+        == second.artifact_sha256
+        == hashlib.sha256(b"jar").hexdigest()
+    )
     assert first.metadata != second.metadata
     assert first.uploader_id != second.uploader_id
     with registry.store.connect() as db:
@@ -106,7 +119,18 @@ def test_observed_checksum_deduplicates_bytes_not_release_or_provenance(registry
     assert_blocked(registry, second, "artifact_unavailable")
 
 
-@pytest.mark.parametrize("field", ["sha256", "artifact_sha256", "scan_state", "clean", "available", "uploader_id", "release_id"])
+@pytest.mark.parametrize(
+    "field",
+    [
+        "sha256",
+        "artifact_sha256",
+        "scan_state",
+        "clean",
+        "available",
+        "uploader_id",
+        "release_id",
+    ],
+)
 def test_client_proof_and_identity_fields_are_not_metadata(field):
     with pytest.raises(ValidationError):
         CapsuleMetadata(**{**METADATA, field: "a" * 64})
@@ -139,22 +163,32 @@ def test_capsule_facts_and_binding_are_immutable(registry):
     assert registry.get(release.release_id, ALICE) == observed
 
 
-@pytest.mark.parametrize("chunks,bound,code", [
-    ([], 3, "artifact_empty"),
-    ([b""], 3, "artifact_empty"),
-    ([b"ab", b"cd"], 3, "artifact_too_large"),
-])
-def test_failed_observation_leaves_no_artifact_or_binding(registry, chunks, bound, code):
+@pytest.mark.parametrize(
+    "chunks,bound,code",
+    [
+        ([], 3, "artifact_empty"),
+        ([b""], 3, "artifact_empty"),
+        ([b"ab", b"cd"], 3, "artifact_too_large"),
+    ],
+)
+def test_failed_observation_leaves_no_artifact_or_binding(
+    registry, chunks, bound, code
+):
     release = reserve(registry)
     with pytest.raises(CapsuleBlocked, match=code):
         registry.observe(release.release_id, ALICE, chunks, max_bytes=bound)
     assert registry.get(release.release_id, ALICE) == release
     with registry.store.connect() as db:
         assert db.execute("SELECT count(*) FROM capsule_artifacts").fetchone()[0] == 0
-        assert db.execute("SELECT count(*) FROM capsule_release_artifacts").fetchone()[0] == 0
+        assert (
+            db.execute("SELECT count(*) FROM capsule_release_artifacts").fetchone()[0]
+            == 0
+        )
 
 
-@pytest.mark.parametrize("chunks,bound", [(["a" * 64], 100), ([b"x"], 0), ([b"x"], True)])
+@pytest.mark.parametrize(
+    "chunks,bound", [(["a" * 64], 100), ([b"x"], 0), ([b"x"], True)]
+)
 def test_observation_requires_bytes_and_deliberate_bound(registry, chunks, bound):
     release = reserve(registry)
     with pytest.raises(ValueError):
@@ -213,11 +247,16 @@ def test_concurrent_binding_has_one_winner(registry):
     assert results.count("release_already_bound") == 1
     with registry.store.connect() as db:
         assert db.execute("SELECT count(*) FROM capsule_artifacts").fetchone()[0] == 1
-        assert db.execute("SELECT count(*) FROM capsule_release_artifacts").fetchone()[0] == 1
+        assert (
+            db.execute("SELECT count(*) FROM capsule_release_artifacts").fetchone()[0]
+            == 1
+        )
 
 
 @pytest.mark.parametrize("state", ["unscanned", "pending", "rejected", "error"])
-def test_all_supported_scan_states_remain_blocked_and_dedup_preserves_state(registry, state):
+def test_all_supported_scan_states_remain_blocked_and_dedup_preserves_state(
+    registry, state
+):
     first = reserve(registry)
     registry.observe(first.release_id, ALICE, [b"jar"], max_bytes=3)
     with registry.store.connect() as db:
@@ -225,12 +264,17 @@ def test_all_supported_scan_states_remain_blocked_and_dedup_preserves_state(regi
     second = reserve(registry)
     registry.observe(second.release_id, ALICE, [b"jar"], max_bytes=3)
     with registry.store.connect() as db:
-        assert db.execute("SELECT scan_state FROM capsule_artifacts").fetchone()[0] == state
+        assert (
+            db.execute("SELECT scan_state FROM capsule_artifacts").fetchone()[0]
+            == state
+        )
     assert_blocked(registry, first, "artifact_unavailable")
     assert_blocked(registry, second, "artifact_unavailable")
 
 
-def test_positive_flags_are_not_supported_proof_even_in_future_or_corrupt_database(registry):
+def test_positive_flags_are_not_supported_proof_even_in_future_or_corrupt_database(
+    registry,
+):
     release = reserve(registry)
     registry.observe(release.release_id, ALICE, [b"jar"], max_bytes=3)
     for statement in (
@@ -243,7 +287,9 @@ def test_positive_flags_are_not_supported_proof_even_in_future_or_corrupt_databa
     # Simulate incompatible future/corrupt state; the final integration gate still denies.
     with registry.store.connect() as db:
         db.execute("PRAGMA ignore_check_constraints=ON")
-        db.execute("UPDATE capsule_artifacts SET scan_state='clean', availability='available'")
+        db.execute(
+            "UPDATE capsule_artifacts SET scan_state='clean', availability='available'"
+        )
     assert_blocked(registry, release, "capsule_integration_not_configured")
     with registry.store.connect() as db:
         db.execute("PRAGMA ignore_check_constraints=ON")
