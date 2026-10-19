@@ -81,7 +81,11 @@ async def lifespan(app: FastAPI):
     app.state.package_snapshot = load_package_snapshot(RELEASE_DIR)
     app.state.package_snapshot_id = None
     app.state.package_snapshot_lock = threading.RLock()
-    current_package_snapshot()
+    try:
+        current_package_snapshot()
+    except HTTPException:
+        # Stay up so a corrected pack can be published; package routes keep returning 503.
+        logger.error("Starting without a loadable active release")
     yield
 
 
