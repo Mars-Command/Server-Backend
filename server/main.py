@@ -59,7 +59,7 @@ PUBLIC_API_BASE_URL = os.environ.get("MARS_PUBLIC_BASE_URL", "").rstrip("/")
 PACK_VERSION = os.environ.get("MARS_PACK_VERSION", RELEASE_DIR.name)
 MINECRAFT_VERSION = os.environ.get("MARS_MINECRAFT_VERSION", "1.21.1")
 LOADER = os.environ.get("MARS_LOADER", "neoforge")
-LOADER_VERSION = os.environ.get("MARS_LOADER_VERSION", "21.1.250")
+LOADER_VERSION = os.environ.get("MARS_LOADER_VERSION", "21.1.259")
 
 if not RELEASE_DIR.is_dir():
     raise RuntimeError(f"Release directory does not exist: {RELEASE_DIR}")
