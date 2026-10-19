@@ -199,7 +199,7 @@ class Settings:
         minecraft_token = os.environ.get("MARS_MINECRAFT_SERVER_TOKEN", "")
         if minecraft_token and minecraft_token == os.environ.get("MARS_API_JWT_SECRET"):
             raise ValueError("Minecraft and package secrets must be different")
-        database = os.environ.get("MARS_COMMUNITY_DB", "")
+        database = os.environ.get("MARS_COMMUNITY_DB", "").replace("\\", "/")
         if database and not Path(database).is_absolute():
             database = str(Path(__file__).resolve().parent.parent / database)
         return cls(
@@ -225,7 +225,10 @@ class Store:
         self.path = path
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         # journal_mode must be selected outside a transaction, including on reopen.
-        db = sqlite3.connect(path, timeout=10)
+        try:
+            db = sqlite3.connect(path, timeout=10)
+        except sqlite3.OperationalError as error:
+            raise RuntimeError(f"Cannot open community database at {path}") from error
         try:
             db.execute("PRAGMA foreign_keys=ON")
             mode = db.execute("PRAGMA journal_mode=WAL").fetchone()[0]
